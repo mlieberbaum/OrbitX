@@ -387,8 +387,62 @@ void Renderer::DrawHudText(){
      if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"HARDWARE"; else if(m_appState==AppState::Extra)title=L"EXTRA";
      tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
      if(m_appState==AppState::ScenarioSelect){
-       auto g=makeButton(subLayout.moonView,0.0f); if(glassGradient.Get()!=nullptr){glassGradient->SetStartPoint(D2D1::Point2F(0,subLayout.moonView.top));glassGradient->SetEndPoint(D2D1::Point2F(0,subLayout.moonView.bottom));m_d2dContext->FillGeometry(g.Get(),glassGradient.Get());}else m_d2dContext->FillGeometry(g.Get(),glass.Get());
-       m_d2dContext->DrawGeometry(g.Get(),green.Get(),1.4f); tracked(L"MOON VIEW",subLayout.moonView.left+33,subLayout.moonView.top+18,m_textMenu.Get(),green.Get(),2.5f); drawFmt(L"Current lunar external-view prototype",subLayout.moonView.left+33,subLayout.moonView.bottom+14,m_textLeft.Get(),white.Get());
+       // Expandable category and nested selectable scenario; no decorative planet icons.
+       drawMenuButton(subLayout.solarSystem,L"SOLAR SYSTEM",m_scenarioHover==0);
+       tracked(m_solarSystemExpanded?L"v":L">",subLayout.solarSystem.right-47,subLayout.solarSystem.top+18,m_textMenu.Get(),green.Get(),0.0f);
+       if(m_solarSystemExpanded){
+         // Indented glass panel uses the exact same illuminated hover style as the main menu.
+         drawMenuButton(subLayout.moonView,L"MOON VIEW",m_scenarioHover==1||m_scenarioSelected);
+         m_d2dContext->DrawLine(D2D1::Point2F(84,subLayout.solarSystem.bottom+6),
+             D2D1::Point2F(84,subLayout.moonView.bottom-28),muted.Get(),1.2f);
+         m_d2dContext->DrawLine(D2D1::Point2F(84,subLayout.moonView.top+32),
+             D2D1::Point2F(subLayout.moonView.left-4,subLayout.moonView.top+32),muted.Get(),1.2f);
+       }
+       if(m_solarSystemExpanded&&m_scenarioSelected){
+         // Floating dark-smoked-glass information panel with green glass edging.
+         const auto& p=subLayout.description;
+         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> panel,previewShade,detail;
+         m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(0.075f,0.095f,0.10f,0.86f),&panel);
+         m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(0.015f,0.027f,0.035f,0.92f),&previewShade);
+         m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(0.57f,0.71f,0.70f,0.88f),&detail);
+         auto pg=makeButton(p,0.0f);
+         m_d2dContext->FillGeometry(pg.Get(),panel.Get());
+         m_d2dContext->DrawGeometry(pg.Get(),greenGlow.Get(),9.0f);
+         m_d2dContext->DrawGeometry(pg.Get(),green.Get(),1.7f);
+         tracked(L"SCENARIO",p.left+34,p.top+27,m_textLeft.Get(),detail.Get(),2.6f);
+         tracked(L"MOON VIEW",p.left+34,p.top+66,m_textMenu.Get(),green.Get(),4.5f);
+         m_d2dContext->DrawLine(D2D1::Point2F(p.left+38,p.top+121),
+             D2D1::Point2F(p.right-38,p.top+121),muted.Get(),1.0f);
+         const auto& v=subLayout.preview;
+         auto previewGeo=makeButton(v,0.0f);
+         m_d2dContext->FillGeometry(previewGeo.Get(),previewShade.Get());
+         if(m_scenarioPreview){
+           // Clip thumbnail inside the bevelled preview viewport.
+           m_d2dContext->PushLayer(D2D1::LayerParameters(
+               D2D1::InfiniteRect(),previewGeo.Get()),nullptr);
+           m_d2dContext->DrawBitmap(m_scenarioPreview.Get(),
+               D2D1::RectF(v.left,v.top,v.right,v.bottom),1.0f,
+               D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
+               D2D1::RectF(120,110,900,370));
+           m_d2dContext->PopLayer();
+         }
+         m_d2dContext->DrawGeometry(previewGeo.Get(),glassHighlight.Get(),1.1f);
+         auto panelText=[&](const wchar_t* value,float top){
+           const auto rc=D2D1::RectF(p.left+36,top,p.right-36,p.bottom-76);
+           m_d2dContext->DrawTextW(value,(UINT32)wcslen(value),m_textLeft.Get(),rc,
+               white.Get(),D2D1_DRAW_TEXT_OPTIONS_NONE,DWRITE_MEASURING_MODE_NATURAL);
+         };
+         panelText(L"Observe the Moon from OrbitX's current\\nexternal-view prototype.",p.top+325);
+         panelText(L"This scenario showcases the lunar rendering\\npipeline, camera controls, and basic scene\\npresentation. More solar-system flyby and\\nsurface-view scenarios will be added here\\nover time.",p.top+418);
+         m_d2dContext->DrawLine(D2D1::Point2F(p.left+32,p.bottom-63),
+             D2D1::Point2F(p.right-30,p.bottom-63),muted.Get(),1.0f);
+         tracked(L"SOLAR SYSTEM",p.left+38,p.bottom-47,m_textLeft.Get(),detail.Get(),2.0f);
+         for(int i=0;i<4;i++)m_d2dContext->FillRectangle(
+             D2D1::RectF(p.right-72+i*11,p.bottom-41,p.right-67+i*11,p.bottom-36),
+             i==0?green.Get():muted.Get());
+         const auto& launch=subLayout.launch;
+         drawMenuButton(launch,L"LAUNCH",m_scenarioHover==2);
+       }
      }else if(m_appState==AppState::Graphics){
        drawFmt(L"DISPLAY MODE",subLayout.title.left,subLayout.graphicsWindowed.top-65,m_textLeft.Get(),white.Get());
        auto a=makeButton(subLayout.graphicsWindowed,0.0f),b=makeButton(subLayout.graphicsFullscreen,0.0f);
