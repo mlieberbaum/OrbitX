@@ -379,7 +379,7 @@ void Renderer::DrawHudText(){
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+8,r.top+5),D2D1::Point2F(r.right-34,r.top+5),hot?green.Get():glassHighlight.Get(),hot?1.6f:0.8f);
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+2,r.top+9),D2D1::Point2F(r.left+2,r.bottom-9),hot?green.Get():muted.Get(),hot?4.0f:1.4f);
        tracked(label,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+14+textOffsetY,m_textMenu.Get(),white.Get(),3.4f);
-       if(hot&&showHoverArrow)tracked(L">",r.right-46,r.top+13,m_textMenu.Get(),green.Get(),0.0f);
+       if(hot&&showHoverArrow)tracked(L">>",r.right-62,r.top+13,m_textMenu.Get(),green.Get(),0.0f);
    };
    if(m_appState==AppState::MainMenu){
      static const wchar_t* labels[]={L"SCENARIOS",L"PARAMETERS",L"VISUAL EFFECTS",L"MODULES",L"GRAPHICS",L"HARDWARE",L"EXTRA",L"EXIT"};
@@ -403,9 +403,9 @@ void Renderer::DrawHudText(){
        if(m_solarSystemExpanded){
          // Indented glass panel uses the exact same illuminated hover style as the main menu.
          drawMenuButton(subLayout.moonView,L"MOON VIEW",m_scenarioHover==1||m_scenarioSelected);
-         m_d2dContext->DrawLine(D2D1::Point2F(84,subLayout.solarSystem.bottom+6),
-             D2D1::Point2F(84,subLayout.moonView.bottom-28),muted.Get(),1.2f);
-         m_d2dContext->DrawLine(D2D1::Point2F(84,subLayout.moonView.top+32),
+         m_d2dContext->DrawLine(D2D1::Point2F(72,subLayout.solarSystem.bottom+6),
+             D2D1::Point2F(72,subLayout.moonView.bottom-28),muted.Get(),1.2f);
+         m_d2dContext->DrawLine(D2D1::Point2F(72,subLayout.moonView.top+32),
              D2D1::Point2F(subLayout.moonView.left-4,subLayout.moonView.top+32),muted.Get(),1.2f);
          // Disabled future scenarios match the concept art, without showing planet icons
          // or registering click targets until their actual scenarios exist.
@@ -414,13 +414,13 @@ void Renderer::DrawHudText(){
            m_d2dContext->FillGeometry(g.Get(),glass.Get());
            m_d2dContext->DrawGeometry(g.Get(),muted.Get(),0.9f);
            tracked(name,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+16,m_textMenu.Get(),muted.Get(),2.2f);
-           m_d2dContext->DrawLine(D2D1::Point2F(84,r.top+31),
+           m_d2dContext->DrawLine(D2D1::Point2F(72,r.top+31),
                D2D1::Point2F(r.left-4,r.top+31),muted.Get(),0.9f);
          };
          futureScenario(subLayout.earthView,L"EARTH VIEW");
          futureScenario(subLayout.marsView,L"MARS VIEW");
-         m_d2dContext->DrawLine(D2D1::Point2F(84,subLayout.moonView.bottom-28),
-             D2D1::Point2F(84,subLayout.marsView.top+31),muted.Get(),0.9f);
+         m_d2dContext->DrawLine(D2D1::Point2F(72,subLayout.moonView.bottom-28),
+             D2D1::Point2F(72,subLayout.marsView.top+31),muted.Get(),0.9f);
        }
        if(m_solarSystemExpanded&&m_scenarioSelected){
          // Floating dark-smoked-glass information panel with green glass edging.
