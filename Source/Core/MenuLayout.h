@@ -39,10 +39,10 @@ struct SubmenuLayout {
     // Submenus deliberately begin below the OrbitX wordmark.  Keep this geometry
     // canonical: rendering and hit-testing consume these exact rectangles.
     RectF back{};
-    RectF title{72,305,620,350};
-    RectF moonView{72,390,560,465};
-    RectF graphicsWindowed{72,435,286,500};
-    RectF graphicsFullscreen{304,435,550,500};
+    RectF title{72,347,620,392};
+    RectF moonView{72,432,560,507};
+    RectF graphicsWindowed{72,477,286,542};
+    RectF graphicsFullscreen{304,477,550,542};
 };
 
 inline float ScaleFor(float width,float height){return std::min(width/kDesignWidth,height/kDesignHeight);}
