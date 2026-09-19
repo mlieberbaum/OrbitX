@@ -40,7 +40,12 @@ struct SubmenuLayout {
     // canonical: rendering and hit-testing consume these exact rectangles.
     RectF back{};
     RectF title{72,347,620,392};
-    RectF moonView{72,432,560,507};
+    // Scenario browser: design-space rectangles shared by rendering and hit-testing.
+    RectF solarSystem{64,445,605,519};
+    RectF moonView{112,540,556,604};
+    RectF description{666,308,1240,940};
+    RectF preview{696,432,1210,602};
+    RectF launch{1548,945,1844,1020};
     RectF graphicsWindowed{72,477,286,542};
     RectF graphicsFullscreen{304,477,550,542};
 };
