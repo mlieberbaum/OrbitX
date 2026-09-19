@@ -75,7 +75,7 @@ private:
     AppState m_appState=AppState::MainMenu;
     int m_menuSelection=0;
     int m_hoverSelection=-1;
-    bool m_solarSystemExpanded=true;
+    bool m_solarSystemExpanded=false;
     bool m_scenarioSelected=false;
     int m_scenarioHover=-1; // 0: category, 1: Moon View, 2: Launch
     bool m_mouseNavigation=false;
