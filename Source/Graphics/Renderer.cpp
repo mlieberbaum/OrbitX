@@ -331,12 +331,8 @@ void Renderer::DrawHudText(){
      const D2D1_RECT_F dst=D2D1::RectF(logoLeft,logoTop,logoLeft+logoWidth,logoTop+logoHeight);
      m_d2dContext->DrawBitmap(m_menuLogo.Get(),dst,1.0f,D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,nullptr);
    }
-   if(m_appState==AppState::MainMenu){
-     static const wchar_t* labels[]={L"SCENARIOS",L"PARAMETERS",L"VISUAL EFFECTS",L"MODULES",L"GRAPHICS",L"JOYSTICK",L"EXTRA",L"ABOUT",L"EXIT"};
-     // Mouse hover owns the visible selection while the cursor is over a button. Keyboard selection is the fallback.
-     const int visualSelection=m_mouseNavigation?m_hoverSelection:m_menuSelection;
-     for(int i=0;i<OrbitX::UI::kMainMenuCount;i++){
-       const auto&r=mainLayout.buttons[i]; bool hot=(i==visualSelection);
+   // Main-menu and submenu BACK controls share the SCENARIOS button renderer.
+   auto drawMenuButton=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool hot){
        auto outer=makeButton(r,0.0f), mid=makeButton(r,2.0f), inner=makeButton(r,5.0f);
        ID2D1Brush* fillBrush = (hot && hotGradient.Get()!=nullptr) ? static_cast<ID2D1Brush*>(hotGradient.Get()) : (glassGradient.Get()!=nullptr ? static_cast<ID2D1Brush*>(glassGradient.Get()) : static_cast<ID2D1Brush*>(glass.Get()));
        if(glassGradient.Get()!=nullptr){ glassGradient->SetStartPoint(D2D1::Point2F(0,r.top)); glassGradient->SetEndPoint(D2D1::Point2F(0,r.bottom)); }
@@ -344,7 +340,6 @@ void Renderer::DrawHudText(){
        m_d2dContext->FillGeometry(mid.Get(),fillBrush);
        m_d2dContext->FillGeometry(inner.Get(),hot?greenGlow.Get():glassInner.Get());
        if(hot){
-         // Multi-pass luminous edge: wide low-alpha halos under a razor-sharp 1.6 px perimeter.
          m_d2dContext->DrawGeometry(outer.Get(),greenGlow.Get(),12.0f);
          m_d2dContext->DrawGeometry(outer.Get(),greenGlow2.Get(),5.0f);
          m_d2dContext->DrawGeometry(outer.Get(),green.Get(),1.6f);
@@ -353,19 +348,22 @@ void Renderer::DrawHudText(){
          m_d2dContext->DrawGeometry(outer.Get(),muted.Get(),0.9f);
          m_d2dContext->DrawGeometry(inner.Get(),glassHighlight.Get(),0.65f);
        }
-       // Specular top edge and illuminated leading rail reproduce the approved glass-panel language.
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+8,r.top+5),D2D1::Point2F(r.right-34,r.top+5),hot?green.Get():glassHighlight.Get(),hot?1.6f:0.8f);
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+2,r.top+9),D2D1::Point2F(r.left+2,r.bottom-9),hot?green.Get():muted.Get(),hot?4.0f:1.4f);
-       tracked(labels[i],mainLayout.textX,r.top+14,m_textMenu.Get(),hot?white.Get():white.Get(),3.4f);
+       tracked(label,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+14,m_textMenu.Get(),white.Get(),3.4f);
        if(hot)tracked(L">",r.right-46,r.top+13,m_textMenu.Get(),green.Get(),0.0f);
+   };
+   if(m_appState==AppState::MainMenu){
+     static const wchar_t* labels[]={L"SCENARIOS",L"PARAMETERS",L"VISUAL EFFECTS",L"MODULES",L"GRAPHICS",L"JOYSTICK",L"EXTRA",L"ABOUT",L"EXIT"};
+     // Mouse hover owns the visible selection while the cursor is over a button. Keyboard selection is the fallback.
+     const int visualSelection=m_mouseNavigation?m_hoverSelection:m_menuSelection;
+     for(int i=0;i<OrbitX::UI::kMainMenuCount;i++){
+       const auto&r=mainLayout.buttons[i]; bool hot=(i==visualSelection);
+       drawMenuButton(r,labels[i],hot);
      }
    }else{
-     // Submenus keep the same floating-glass language, but start BELOW the logo.
-     auto backGeo=makeButton(subLayout.back,0.0f);
-     if(glassGradient.Get()!=nullptr){glassGradient->SetStartPoint(D2D1::Point2F(0,subLayout.back.top));glassGradient->SetEndPoint(D2D1::Point2F(0,subLayout.back.bottom));m_d2dContext->FillGeometry(backGeo.Get(),glassGradient.Get());}
-     else m_d2dContext->FillGeometry(backGeo.Get(),glass.Get());
-     m_d2dContext->DrawGeometry(backGeo.Get(),green.Get(),1.4f);
-     tracked(L"<  BACK",subLayout.back.left+24,subLayout.back.top+14,m_textMenu.Get(),green.Get(),1.2f);
+     // Submenus share the main menu's button position, styling, and hover treatment.
+     drawMenuButton(subLayout.back,L"BACK",m_mouseNavigation && m_hoverSelection==0);
      const wchar_t* title=L"";
      if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"JOYSTICK"; else if(m_appState==AppState::Extra)title=L"EXTRA"; else if(m_appState==AppState::About)title=L"ABOUT";
      tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
@@ -473,7 +471,7 @@ void Renderer::OnLeftClick(int x,int y){
    if(hit>=0){m_menuSelection=hit;OnKeyDown(VK_RETURN);} return;
  }
  const auto layout=OrbitX::UI::BuildSubmenuLayout((float)m_width,(float)m_height);
- if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;return;}
+ if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;m_mouseNavigation=false;return;}
  if(m_appState==AppState::ScenarioSelect&&OrbitX::UI::HitTestButton(layout.moonView,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::Simulation;return;}
  if(m_appState==AppState::Graphics){
    if(OrbitX::UI::HitTestButton(layout.graphicsWindowed,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(false);
@@ -510,6 +508,12 @@ void Renderer::OnMouseMove(int x,int y){
    m_hoverSelection=OrbitX::UI::HitTestMainMenu(layout,(float)x,(float)y);
    return;
  }
+ if(m_appState!=AppState::Simulation&&!m_drag){
+   const auto layout=OrbitX::UI::BuildSubmenuLayout((float)m_width,(float)m_height);
+   m_mouseNavigation=true;
+   m_hoverSelection=OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)?0:-1;
+   return;
+ }
  if(!m_drag)return;
  POINT pt{};GetCursorPos(&pt);
  const int dx=pt.x-m_dragAnchorScreen.x,dy=pt.y-m_dragAnchorScreen.y;
@@ -525,7 +529,7 @@ void Renderer::OnMouseMove(int x,int y){
  m_pitch=fmodf(m_pitch,twoPi);if(m_pitch<0.0f)m_pitch+=twoPi;
  SetCursorPos(m_dragAnchorScreen.x,m_dragAnchorScreen.y);
 }
-void Renderer::OnMouseLeave(){if(m_appState==AppState::MainMenu&&!m_drag){m_hoverSelection=-1;m_mouseNavigation=false;}}
+void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_mouseNavigation=false;}}
 
 void Renderer::OnMouseWheel(short d){if(m_appState!=AppState::Simulation)return;m_distanceKm=std::clamp(m_distanceKm*(d>0?.90f:1.10f),1800.0f,500000.0f);}
 }
