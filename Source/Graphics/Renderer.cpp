@@ -418,7 +418,7 @@ void Renderer::DrawHudText(){
          m_d2dContext->FillGeometry(previewGeo.Get(),previewShade.Get());
          if(m_scenarioPreview){
            // Clip thumbnail inside the bevelled preview viewport.
-           m_d2dContext->PushLayer(D2D1::LayerParameters(
+           m_d2dContext->PushLayer(D2D1::LayerParameters1(
                D2D1::InfiniteRect(),previewGeo.Get()),nullptr);
            m_d2dContext->DrawBitmap(m_scenarioPreview.Get(),
                D2D1::RectF(v.left,v.top,v.right,v.bottom),1.0f,
