@@ -178,7 +178,7 @@ bool Renderer::CreateHudBackBufferTargets(){
  return true;
 }
 
-bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateSphere()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC(m_root+L"\\Textures\\Moon\\Moon_Orbiter_L8.jpg"))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo();}
+bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateSphere()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC(m_root+L"\\Textures\\Moon\\Moon_Orbiter_L8.jpg"))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
 
 bool Renderer::LoadMenuBackground(){
  ComPtr<IWICImagingFactory> f; HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
@@ -206,6 +206,25 @@ bool Renderer::LoadMenuLogo(){
  hr=m_d2dContext->CreateBitmapFromWicBitmap(cv.Get(),nullptr,&m_menuLogo);
  if(FAILED(hr)){SetError("Create menu logo bitmap: "+HrText(hr));return false;}
  return true;
+}
+
+// A lightweight terrain thumbnail derived from the already-shipped lunar map.
+// Resize before uploading to Direct2D; do not decode a second full-resolution GPU texture.
+bool Renderer::LoadScenarioPreview(){
+ ComPtr<IWICImagingFactory> f;
+ if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f))))return false;
+ ComPtr<IWICBitmapDecoder> d;
+ const auto path=m_root+L"\\Textures\\Moon\\Moon_Orbiter_L8.jpg";
+ if(FAILED(f->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d)))return false;
+ ComPtr<IWICBitmapFrameDecode> fr;
+ if(FAILED(d->GetFrame(0,&fr)))return false;
+ ComPtr<IWICBitmapScaler> scaler;
+ if(FAILED(f->CreateBitmapScaler(&scaler)))return false;
+ if(FAILED(scaler->Initialize(fr.Get(),1024,512,WICBitmapInterpolationModeFant)))return false;
+ ComPtr<IWICFormatConverter> cv;
+ if(FAILED(f->CreateFormatConverter(&cv)))return false;
+ if(FAILED(cv->Initialize(scaler.Get(),GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return false;
+ return SUCCEEDED(m_d2dContext->CreateBitmapFromWicBitmap(cv.Get(),nullptr,&m_scenarioPreview));
 }
 
 void Renderer::UpdateCB(){
