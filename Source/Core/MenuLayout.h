@@ -6,7 +6,7 @@ namespace OrbitX::UI {
 
 constexpr float kDesignWidth  = 1920.0f;
 constexpr float kDesignHeight = 1080.0f;
-constexpr int   kMainMenuCount = 9;
+constexpr int   kMainMenuCount = 8;
 
 struct RectF {
     float left{}, top{}, right{}, bottom{};
