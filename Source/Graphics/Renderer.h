@@ -37,7 +37,7 @@ private:
     struct Vertex { DirectX::XMFLOAT3 pos, normal; DirectX::XMFLOAT2 uv; };
     struct SceneCB { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 model; DirectX::XMFLOAT4 sunDir; };
     bool InitDevice(); bool InitAssets(); bool CreateSphere(); bool LoadTextureWIC(const std::wstring& path);
-    bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo();
+    bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo(); bool LoadScenarioPreview();
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);
 
@@ -64,6 +64,7 @@ private:
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_textBrush;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_menuBackground;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_menuLogo;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_scenarioPreview;
     Microsoft::WRL::ComPtr<ID3D11Resource> m_wrappedBack[FrameCount];
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_d2dTarget[FrameCount];
 
@@ -73,6 +74,9 @@ private:
     AppState m_appState=AppState::MainMenu;
     int m_menuSelection=0;
     int m_hoverSelection=-1;
+    bool m_solarSystemExpanded=true;
+    bool m_scenarioSelected=false;
+    int m_scenarioHover=-1; // 0: category, 1: Moon View, 2: Launch
     bool m_mouseNavigation=false;
     bool m_fullscreen=false; WINDOWPLACEMENT m_windowedPlacement{sizeof(WINDOWPLACEMENT)}; DWORD m_windowedStyle=WS_OVERLAPPEDWINDOW;
     bool m_drag=false; POINT m_dragAnchorScreen{};
