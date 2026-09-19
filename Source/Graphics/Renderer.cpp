@@ -397,6 +397,20 @@ void Renderer::DrawHudText(){
              D2D1::Point2F(84,subLayout.moonView.bottom-28),muted.Get(),1.2f);
          m_d2dContext->DrawLine(D2D1::Point2F(84,subLayout.moonView.top+32),
              D2D1::Point2F(subLayout.moonView.left-4,subLayout.moonView.top+32),muted.Get(),1.2f);
+         // Disabled future scenarios match the concept art, without showing planet icons
+         // or registering click targets until their actual scenarios exist.
+         auto futureScenario=[&](const OrbitX::UI::RectF& r,const wchar_t* name){
+           auto g=makeButton(r,0.0f);
+           m_d2dContext->FillGeometry(g.Get(),glass.Get());
+           m_d2dContext->DrawGeometry(g.Get(),muted.Get(),0.9f);
+           tracked(name,r.left+37,r.top+16,m_textMenu.Get(),muted.Get(),2.2f);
+           m_d2dContext->DrawLine(D2D1::Point2F(84,r.top+31),
+               D2D1::Point2F(r.left-4,r.top+31),muted.Get(),0.9f);
+         };
+         futureScenario(subLayout.earthView,L"EARTH VIEW");
+         futureScenario(subLayout.marsView,L"MARS VIEW");
+         m_d2dContext->DrawLine(D2D1::Point2F(84,subLayout.moonView.bottom-28),
+             D2D1::Point2F(84,subLayout.marsView.top+31),muted.Get(),0.9f);
        }
        if(m_solarSystemExpanded&&m_scenarioSelected){
          // Floating dark-smoked-glass information panel with green glass edging.
