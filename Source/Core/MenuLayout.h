@@ -43,6 +43,8 @@ struct SubmenuLayout {
     // Scenario browser: design-space rectangles shared by rendering and hit-testing.
     RectF solarSystem{64,445,605,519};
     RectF moonView{112,540,556,604};
+    RectF earthView{112,615,556,679}; // Future scenario: visible but disabled.
+    RectF marsView{112,690,556,754};  // Future scenario: visible but disabled.
     RectF description{666,308,1240,940};
     RectF preview{696,432,1210,602};
     RectF launch{1548,945,1844,1020};
