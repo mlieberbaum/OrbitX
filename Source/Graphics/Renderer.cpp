@@ -214,16 +214,25 @@ bool Renderer::LoadScenarioPreview(){
  ComPtr<IWICImagingFactory> f;
  if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f))))return false;
  ComPtr<IWICBitmapDecoder> d;
- const auto path=m_root+L"\\Textures\\Moon\\Moon_Orbiter_L8.jpg";
- if(FAILED(f->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d)))return false;
+ const auto artwork=m_root+L"\\Textures\\Menu\\MoonViewPreview.jpg";
+ m_scenarioPreviewArtwork=SUCCEEDED(f->CreateDecoderFromFilename(
+     artwork.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d));
+ if(!m_scenarioPreviewArtwork){
+   const auto map=m_root+L"\\Textures\\Moon\\Moon_Orbiter_L8.jpg";
+   if(FAILED(f->CreateDecoderFromFilename(map.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d)))return false;
+ }
  ComPtr<IWICBitmapFrameDecode> fr;
  if(FAILED(d->GetFrame(0,&fr)))return false;
+ ComPtr<IWICBitmapSource> source=fr;
  ComPtr<IWICBitmapScaler> scaler;
- if(FAILED(f->CreateBitmapScaler(&scaler)))return false;
- if(FAILED(scaler->Initialize(fr.Get(),1024,512,WICBitmapInterpolationModeFant)))return false;
+ if(!m_scenarioPreviewArtwork){
+   if(FAILED(f->CreateBitmapScaler(&scaler)))return false;
+   if(FAILED(scaler->Initialize(fr.Get(),1024,512,WICBitmapInterpolationModeFant)))return false;
+   source=scaler;
+ }
  ComPtr<IWICFormatConverter> cv;
  if(FAILED(f->CreateFormatConverter(&cv)))return false;
- if(FAILED(cv->Initialize(scaler.Get(),GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return false;
+ if(FAILED(cv->Initialize(source.Get(),GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return false;
  return SUCCEEDED(m_d2dContext->CreateBitmapFromWicBitmap(cv.Get(),nullptr,&m_scenarioPreview));
 }
 
@@ -437,7 +446,9 @@ void Renderer::DrawHudText(){
            m_d2dContext->DrawBitmap(m_scenarioPreview.Get(),
                D2D1::RectF(v.left,v.top,v.right,v.bottom),1.0f,
                D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
-               D2D1::RectF(120,110,900,370));
+               m_scenarioPreviewArtwork?
+                 D2D1::RectF(0,0,m_scenarioPreview->GetSize().width,m_scenarioPreview->GetSize().height):
+                 D2D1::RectF(120,110,900,370));
            m_d2dContext->PopLayer();
          }
          m_d2dContext->DrawGeometry(previewGeo.Get(),glassHighlight.Get(),1.1f);
