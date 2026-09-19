@@ -354,7 +354,7 @@ void Renderer::DrawHudText(){
        if(hot)tracked(L">",r.right-46,r.top+13,m_textMenu.Get(),green.Get(),0.0f);
    };
    if(m_appState==AppState::MainMenu){
-     static const wchar_t* labels[]={L"SCENARIOS",L"PARAMETERS",L"VISUAL EFFECTS",L"MODULES",L"GRAPHICS",L"JOYSTICK",L"EXTRA",L"ABOUT",L"EXIT"};
+     static const wchar_t* labels[]={L"SCENARIOS",L"PARAMETERS",L"VISUAL EFFECTS",L"MODULES",L"GRAPHICS",L"HARDWARE",L"EXTRA",L"EXIT"};
      // Mouse hover owns the visible selection while the cursor is over a button. Keyboard selection is the fallback.
      const int visualSelection=m_mouseNavigation?m_hoverSelection:m_menuSelection;
      for(int i=0;i<OrbitX::UI::kMainMenuCount;i++){
@@ -365,7 +365,7 @@ void Renderer::DrawHudText(){
      // Submenus share the main menu's button position, styling, and hover treatment.
      drawMenuButton(subLayout.back,L"BACK",m_mouseNavigation && m_hoverSelection==0);
      const wchar_t* title=L"";
-     if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"JOYSTICK"; else if(m_appState==AppState::Extra)title=L"EXTRA"; else if(m_appState==AppState::About)title=L"ABOUT";
+     if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"HARDWARE"; else if(m_appState==AppState::Extra)title=L"EXTRA";
      tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
      if(m_appState==AppState::ScenarioSelect){
        auto g=makeButton(subLayout.moonView,0.0f); if(glassGradient.Get()!=nullptr){glassGradient->SetStartPoint(D2D1::Point2F(0,subLayout.moonView.top));glassGradient->SetEndPoint(D2D1::Point2F(0,subLayout.moonView.bottom));m_d2dContext->FillGeometry(g.Get(),glassGradient.Get());}else m_d2dContext->FillGeometry(g.Get(),glass.Get());
@@ -460,7 +460,7 @@ void Renderer::OnKeyDown(WPARAM k){
    return;
  }
  if(m_appState==AppState::Simulation)return;
- if(m_appState==AppState::MainMenu){if(k==VK_UP){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+8)%9;}else if(k==VK_DOWN){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+1)%9;}else if(k==VK_RETURN){if(m_menuSelection==8){PostMessage(m_hwnd,WM_CLOSE,0,0);return;}static const AppState states[]={AppState::ScenarioSelect,AppState::Parameters,AppState::VisualEffects,AppState::Modules,AppState::Graphics,AppState::Joystick,AppState::Extra,AppState::About};m_appState=states[m_menuSelection];}return;}
+ if(m_appState==AppState::MainMenu){if(k==VK_UP){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+OrbitX::UI::kMainMenuCount-1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_DOWN){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_RETURN){if(m_menuSelection==OrbitX::UI::kMainMenuCount-1){PostMessage(m_hwnd,WM_CLOSE,0,0);return;}static const AppState states[]={AppState::ScenarioSelect,AppState::Parameters,AppState::VisualEffects,AppState::Modules,AppState::Graphics,AppState::Joystick,AppState::Extra};m_appState=states[m_menuSelection];}return;}
  if(k==VK_RETURN&&m_appState==AppState::ScenarioSelect)m_appState=AppState::Simulation;
 }
 void Renderer::OnLeftClick(int x,int y){
