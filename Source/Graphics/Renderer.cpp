@@ -360,7 +360,7 @@ void Renderer::DrawHudText(){
      m_d2dContext->DrawBitmap(m_menuLogo.Get(),dst,1.0f,D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,nullptr);
    }
    // Main-menu and submenu BACK controls share the SCENARIOS button renderer.
-   auto drawMenuButton=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool hot,bool showHoverArrow=true){
+   auto drawMenuButton=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool hot,bool showHoverArrow=true,float textOffsetY=0.0f){
        auto outer=makeButton(r,0.0f), mid=makeButton(r,2.0f), inner=makeButton(r,5.0f);
        ID2D1Brush* fillBrush = (hot && hotGradient.Get()!=nullptr) ? static_cast<ID2D1Brush*>(hotGradient.Get()) : (glassGradient.Get()!=nullptr ? static_cast<ID2D1Brush*>(glassGradient.Get()) : static_cast<ID2D1Brush*>(glass.Get()));
        if(glassGradient.Get()!=nullptr){ glassGradient->SetStartPoint(D2D1::Point2F(0,r.top)); glassGradient->SetEndPoint(D2D1::Point2F(0,r.bottom)); }
@@ -378,7 +378,7 @@ void Renderer::DrawHudText(){
        }
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+8,r.top+5),D2D1::Point2F(r.right-34,r.top+5),hot?green.Get():glassHighlight.Get(),hot?1.6f:0.8f);
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+2,r.top+9),D2D1::Point2F(r.left+2,r.bottom-9),hot?green.Get():muted.Get(),hot?4.0f:1.4f);
-       tracked(label,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+14,m_textMenu.Get(),white.Get(),3.4f);
+       tracked(label,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+14+textOffsetY,m_textMenu.Get(),white.Get(),3.4f);
        if(hot&&showHoverArrow)tracked(L">",r.right-46,r.top+13,m_textMenu.Get(),green.Get(),0.0f);
    };
    if(m_appState==AppState::MainMenu){
@@ -391,14 +391,15 @@ void Renderer::DrawHudText(){
      }
    }else{
      // Submenus share the main menu's button position, styling, and hover treatment.
-     drawMenuButton(subLayout.back,L"BACK",m_mouseNavigation && m_hoverSelection==0);
+     drawMenuButton(subLayout.back,L"BACK",m_mouseNavigation && m_hoverSelection==0,false);
+     tracked(L"<<",subLayout.back.left+18,subLayout.back.top+14,m_textMenu.Get(),green.Get(),0.0f);
      const wchar_t* title=L"";
      if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"HARDWARE"; else if(m_appState==AppState::Extra)title=L"EXTRA";
      tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
      if(m_appState==AppState::ScenarioSelect){
        // Expandable category and nested selectable scenario; no decorative planet icons.
-       drawMenuButton(subLayout.solarSystem,L"SOLAR SYSTEM",m_scenarioHover==0,false);
-       tracked(m_solarSystemExpanded?L"v":L">",subLayout.solarSystem.right-47,subLayout.solarSystem.top+18,m_textMenu.Get(),green.Get(),0.0f);
+       drawMenuButton(subLayout.solarSystem,L"SOLAR SYSTEM",m_scenarioHover==0,false,7.0f);
+       tracked(m_solarSystemExpanded?L"v":L">",subLayout.solarSystem.right-47,subLayout.solarSystem.top+25,m_textMenu.Get(),green.Get(),0.0f);
        if(m_solarSystemExpanded){
          // Indented glass panel uses the exact same illuminated hover style as the main menu.
          drawMenuButton(subLayout.moonView,L"MOON VIEW",m_scenarioHover==1||m_scenarioSelected);
@@ -412,7 +413,7 @@ void Renderer::DrawHudText(){
            auto g=makeButton(r,0.0f);
            m_d2dContext->FillGeometry(g.Get(),glass.Get());
            m_d2dContext->DrawGeometry(g.Get(),muted.Get(),0.9f);
-           tracked(name,r.left+37,r.top+16,m_textMenu.Get(),muted.Get(),2.2f);
+           tracked(name,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+16,m_textMenu.Get(),muted.Get(),2.2f);
            m_d2dContext->DrawLine(D2D1::Point2F(84,r.top+31),
                D2D1::Point2F(r.left-4,r.top+31),muted.Get(),0.9f);
          };
@@ -558,7 +559,7 @@ void Renderer::OnKeyDown(WPARAM k){
    return;
  }
  if(m_appState==AppState::Simulation)return;
- if(m_appState==AppState::MainMenu){if(k==VK_UP){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+OrbitX::UI::kMainMenuCount-1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_DOWN){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_RETURN){if(m_menuSelection==OrbitX::UI::kMainMenuCount-1){PostMessage(m_hwnd,WM_CLOSE,0,0);return;}static const AppState states[]={AppState::ScenarioSelect,AppState::Parameters,AppState::VisualEffects,AppState::Modules,AppState::Graphics,AppState::Joystick,AppState::Extra};m_appState=states[m_menuSelection];}return;}
+ if(m_appState==AppState::MainMenu){if(k==VK_UP){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+OrbitX::UI::kMainMenuCount-1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_DOWN){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_RETURN){if(m_menuSelection==OrbitX::UI::kMainMenuCount-1){PostMessage(m_hwnd,WM_CLOSE,0,0);return;}static const AppState states[]={AppState::ScenarioSelect,AppState::Parameters,AppState::VisualEffects,AppState::Modules,AppState::Graphics,AppState::Joystick,AppState::Extra};m_appState=states[m_menuSelection];if(m_appState==AppState::ScenarioSelect){m_solarSystemExpanded=false;m_scenarioSelected=false;m_scenarioHover=-1;}m_hoverSelection=-1;m_mouseNavigation=false;}return;}
  // A scenario is launched only with the explicit LAUNCH control, never by selecting it.
 }
 void Renderer::OnLeftClick(int x,int y){
