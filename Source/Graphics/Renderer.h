@@ -65,6 +65,7 @@ private:
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_menuBackground;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_menuLogo;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_scenarioPreview;
+    bool m_scenarioPreviewArtwork=false;
     Microsoft::WRL::ComPtr<ID3D11Resource> m_wrappedBack[FrameCount];
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_d2dTarget[FrameCount];
 
