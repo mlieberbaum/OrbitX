@@ -88,7 +88,7 @@ bool Renderer::LoadTextureWIC(const std::wstring&path){
  m_alloc[m_frame]->Reset();m_cmd->Reset(m_alloc[m_frame].Get(),nullptr);for(UINT m=0;m<mipCount;m++){D3D12_TEXTURE_COPY_LOCATION dst{m_texture.Get(),D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};dst.SubresourceIndex=m;D3D12_TEXTURE_COPY_LOCATION sr{up.Get(),D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};sr.PlacedFootprint=fp[m];m_cmd->CopyTextureRegion(&dst,0,0,0,&sr,nullptr);}
  D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=m_texture.Get();b.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_DEST;b.Transition.StateAfter=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;m_cmd->ResourceBarrier(1,&b);m_cmd->Close();ID3D12CommandList*l[]={m_cmd.Get()};m_queue->ExecuteCommandLists(1,l);WaitForGPU();
  D3D12_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=td.Format;sv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;sv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;sv.Texture2D.MipLevels=mipCount;m_device->CreateShaderResourceView(m_texture.Get(),&sv,m_srvHeap->GetCPUDescriptorHandleForHeapStart());
- std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<"Texture source "<<sw<<"x"<<sh<<", upload "<<tw<<"x"<<th<<", mip levels "<<mipCount<<", 16x anisotropic filtering\\n";return true;}
+ std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<"Texture source "<<sw<<"x"<<sh<<", upload "<<tw<<"x"<<th<<", mip levels "<<mipCount<<", 16x anisotropic filtering\n";return true;}
 
 bool Renderer::CreateDepth(){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;d.Width=m_width;d.Height=m_height;d.DepthOrArraySize=1;d.MipLevels=1;d.Format=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.Flags=D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;D3D12_CLEAR_VALUE cv{};cv.Format=d.Format;cv.DepthStencil.Depth=1;auto hp=Heap(D3D12_HEAP_TYPE_DEFAULT);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_DEPTH_WRITE,&cv,IID_PPV_ARGS(&m_depth))))return false;m_device->CreateDepthStencilView(m_depth.Get(),nullptr,m_dsvHeap->GetCPUDescriptorHandleForHeapStart());return true;}
 bool Renderer::CreateConstantBuffer(){auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto d=BufferDesc(256);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_cb))))return false;m_cb->Map(0,nullptr,(void**)&m_cbPtr);return true;}
@@ -432,8 +432,8 @@ void Renderer::DrawHudText(){
            m_d2dContext->DrawTextW(value,(UINT32)wcslen(value),m_textLeft.Get(),rc,
                white.Get(),D2D1_DRAW_TEXT_OPTIONS_NONE,DWRITE_MEASURING_MODE_NATURAL);
          };
-         panelText(L"Observe the Moon from OrbitX's current\\nexternal-view prototype.",p.top+325);
-         panelText(L"This scenario showcases the lunar rendering\\npipeline, camera controls, and basic scene\\npresentation. More solar-system flyby and\\nsurface-view scenarios will be added here\\nover time.",p.top+418);
+         panelText(L"Observe the Moon from OrbitX's current\nexternal-view prototype.",p.top+325);
+         panelText(L"This scenario showcases the lunar rendering\npipeline, camera controls, and basic scene\npresentation. More solar-system flyby and\nsurface-view scenarios will be added here\nover time.",p.top+418);
          m_d2dContext->DrawLine(D2D1::Point2F(p.left+32,p.bottom-63),
              D2D1::Point2F(p.right-30,p.bottom-63),muted.Get(),1.0f);
          tracked(L"SOLAR SYSTEM",p.left+38,p.bottom-47,m_textLeft.Get(),detail.Get(),2.0f);
@@ -534,7 +534,7 @@ void Renderer::OnKeyDown(WPARAM k){
  }
  if(m_appState==AppState::Simulation)return;
  if(m_appState==AppState::MainMenu){if(k==VK_UP){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+OrbitX::UI::kMainMenuCount-1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_DOWN){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_RETURN){if(m_menuSelection==OrbitX::UI::kMainMenuCount-1){PostMessage(m_hwnd,WM_CLOSE,0,0);return;}static const AppState states[]={AppState::ScenarioSelect,AppState::Parameters,AppState::VisualEffects,AppState::Modules,AppState::Graphics,AppState::Joystick,AppState::Extra};m_appState=states[m_menuSelection];}return;}
- if(k==VK_RETURN&&m_appState==AppState::ScenarioSelect)m_appState=AppState::Simulation;
+ // A scenario is launched only with the explicit LAUNCH control, never by selecting it.
 }
 void Renderer::OnLeftClick(int x,int y){
  if(m_appState==AppState::Simulation)return;
@@ -544,8 +544,14 @@ void Renderer::OnLeftClick(int x,int y){
    if(hit>=0){m_menuSelection=hit;OnKeyDown(VK_RETURN);} return;
  }
  const auto layout=OrbitX::UI::BuildSubmenuLayout((float)m_width,(float)m_height);
- if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;m_mouseNavigation=false;return;}
- if(m_appState==AppState::ScenarioSelect&&OrbitX::UI::HitTestButton(layout.moonView,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::Simulation;return;}
+ if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;m_scenarioHover=-1;m_mouseNavigation=false;return;}
+ if(m_appState==AppState::ScenarioSelect){
+   const auto hit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
+   if(hit(layout.solarSystem)){m_solarSystemExpanded=!m_solarSystemExpanded;m_scenarioHover=-1;return;}
+   if(m_solarSystemExpanded&&hit(layout.moonView)){m_scenarioSelected=true;m_scenarioHover=1;return;}
+   if(m_solarSystemExpanded&&m_scenarioSelected&&hit(layout.launch)){m_appState=AppState::Simulation;m_scenarioHover=-1;return;}
+   return;
+ }
  if(m_appState==AppState::Graphics){
    if(OrbitX::UI::HitTestButton(layout.graphicsWindowed,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(false);
    else if(OrbitX::UI::HitTestButton(layout.graphicsFullscreen,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(true);
@@ -584,7 +590,14 @@ void Renderer::OnMouseMove(int x,int y){
  if(m_appState!=AppState::Simulation&&!m_drag){
    const auto layout=OrbitX::UI::BuildSubmenuLayout((float)m_width,(float)m_height);
    m_mouseNavigation=true;
-   m_hoverSelection=OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)?0:-1;
+   const auto hit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
+   m_hoverSelection=hit(layout.back)?0:-1;
+   m_scenarioHover=-1;
+   if(m_appState==AppState::ScenarioSelect){
+     if(hit(layout.solarSystem))m_scenarioHover=0;
+     else if(m_solarSystemExpanded&&hit(layout.moonView))m_scenarioHover=1;
+     else if(m_solarSystemExpanded&&m_scenarioSelected&&hit(layout.launch))m_scenarioHover=2;
+   }
    return;
  }
  if(!m_drag)return;
@@ -602,7 +615,7 @@ void Renderer::OnMouseMove(int x,int y){
  m_pitch=fmodf(m_pitch,twoPi);if(m_pitch<0.0f)m_pitch+=twoPi;
  SetCursorPos(m_dragAnchorScreen.x,m_dragAnchorScreen.y);
 }
-void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_mouseNavigation=false;}}
+void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_scenarioHover=-1;m_mouseNavigation=false;}}
 
 void Renderer::OnMouseWheel(short d){if(m_appState!=AppState::Simulation)return;m_distanceKm=std::clamp(m_distanceKm*(d>0?.90f:1.10f),1800.0f,500000.0f);}
 }
