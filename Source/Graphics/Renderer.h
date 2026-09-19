@@ -69,7 +69,7 @@ private:
 
     OrbitX::Core::SimulationState m_state;
     float m_yaw=0.35f,m_pitch=0.18f,m_distanceKm=5200.0f,m_fov=40.0f;
-    enum class AppState { MainMenu, ScenarioSelect, Parameters, VisualEffects, Modules, Graphics, Joystick, Extra, About, Simulation };
+    enum class AppState { MainMenu, ScenarioSelect, Parameters, VisualEffects, Modules, Graphics, Joystick, Extra, Simulation };
     AppState m_appState=AppState::MainMenu;
     int m_menuSelection=0;
     int m_hoverSelection=-1;
