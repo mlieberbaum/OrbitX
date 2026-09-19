@@ -337,6 +337,23 @@ void Renderer::DrawHudText(){
        m_d2dContext->DrawTextLayout(D2D1::Point2F(x,y),baseLayout.Get(),brush,D2D1_DRAW_TEXT_OPTIONS_NONE);
      }
    };
+   // Center labels and chevrons using measured DirectWrite line-box geometry.
+   auto centeredButtonText=[&](const wchar_t* value,const OrbitX::UI::RectF& r,float x,
+                               IDWriteTextFormat* fmt,ID2D1Brush* brush,float spacing){
+     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+     if(FAILED(m_dwriteFactory->CreateTextLayout(value,(UINT32)wcslen(value),fmt,
+         1000.0f,120.0f,&layout)))return;
+     Microsoft::WRL::ComPtr<IDWriteTextLayout1> layout1;
+     if(SUCCEEDED(layout.As(&layout1))){
+       DWRITE_TEXT_RANGE range{0,(UINT32)wcslen(value)};
+       layout1->SetCharacterSpacing(0.0f,spacing,0.0f,range);
+     }
+     DWRITE_TEXT_METRICS metrics{};
+     if(FAILED(layout->GetMetrics(&metrics)))return;
+     const float y=r.top+(r.Height()-metrics.height)*0.5f-metrics.top;
+     m_d2dContext->DrawTextLayout(D2D1::Point2F(x,y),layout.Get(),brush,
+         D2D1_DRAW_TEXT_OPTIONS_NONE);
+   };
    auto makeButton=[&](const OrbitX::UI::RectF& r,float inset){
      Microsoft::WRL::ComPtr<ID2D1PathGeometry> geo; m_d2dFactory->CreatePathGeometry(&geo);
      Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink; geo->Open(&sink);
@@ -360,7 +377,7 @@ void Renderer::DrawHudText(){
      m_d2dContext->DrawBitmap(m_menuLogo.Get(),dst,1.0f,D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,nullptr);
    }
    // Main-menu and submenu BACK controls share the SCENARIOS button renderer.
-   auto drawMenuButton=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool hot,bool showHoverArrow=true,float textOffsetY=0.0f){
+   auto drawMenuButton=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool hot,bool showHoverArrow=true){
        auto outer=makeButton(r,0.0f), mid=makeButton(r,2.0f), inner=makeButton(r,5.0f);
        ID2D1Brush* fillBrush = (hot && hotGradient.Get()!=nullptr) ? static_cast<ID2D1Brush*>(hotGradient.Get()) : (glassGradient.Get()!=nullptr ? static_cast<ID2D1Brush*>(glassGradient.Get()) : static_cast<ID2D1Brush*>(glass.Get()));
        if(glassGradient.Get()!=nullptr){ glassGradient->SetStartPoint(D2D1::Point2F(0,r.top)); glassGradient->SetEndPoint(D2D1::Point2F(0,r.bottom)); }
@@ -378,8 +395,8 @@ void Renderer::DrawHudText(){
        }
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+8,r.top+5),D2D1::Point2F(r.right-34,r.top+5),hot?green.Get():glassHighlight.Get(),hot?1.6f:0.8f);
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+2,r.top+9),D2D1::Point2F(r.left+2,r.bottom-9),hot?green.Get():muted.Get(),hot?4.0f:1.4f);
-       tracked(label,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+14+textOffsetY,m_textMenu.Get(),white.Get(),3.4f);
-       if(hot&&showHoverArrow)tracked(L">>",r.right-62,r.top+13,m_textMenu.Get(),green.Get(),0.0f);
+       centeredButtonText(label,r,r.left+(mainLayout.textX-mainLayout.buttons[0].left),m_textMenu.Get(),white.Get(),3.4f);
+       if(hot&&showHoverArrow)centeredButtonText(L">>",r,r.right-62,m_textMenu.Get(),green.Get(),0.0f);
    };
    if(m_appState==AppState::MainMenu){
      static const wchar_t* labels[]={L"SCENARIOS",L"PARAMETERS",L"VISUAL EFFECTS",L"MODULES",L"GRAPHICS",L"HARDWARE",L"EXTRA",L"EXIT"};
@@ -392,14 +409,14 @@ void Renderer::DrawHudText(){
    }else{
      // Submenus share the main menu's button position, styling, and hover treatment.
      drawMenuButton(subLayout.back,L"BACK",m_mouseNavigation && m_hoverSelection==0,false);
-     tracked(L"<<",subLayout.back.left+18,subLayout.back.top+14,m_textMenu.Get(),green.Get(),0.0f);
+     centeredButtonText(L"<<",subLayout.back,subLayout.back.left+18,m_textMenu.Get(),green.Get(),0.0f);
      const wchar_t* title=L"";
      if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"HARDWARE"; else if(m_appState==AppState::Extra)title=L"EXTRA";
      tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
      if(m_appState==AppState::ScenarioSelect){
        // Expandable category and nested selectable scenario; no decorative planet icons.
-       drawMenuButton(subLayout.solarSystem,L"SOLAR SYSTEM",m_scenarioHover==0,false,7.0f);
-       tracked(m_solarSystemExpanded?L"v":L">",subLayout.solarSystem.right-47,subLayout.solarSystem.top+25,m_textMenu.Get(),green.Get(),0.0f);
+       drawMenuButton(subLayout.solarSystem,L"SOLAR SYSTEM",m_scenarioHover==0,false);
+       centeredButtonText(m_solarSystemExpanded?L"v":L">",subLayout.solarSystem,subLayout.solarSystem.right-47,m_textMenu.Get(),green.Get(),0.0f);
        if(m_solarSystemExpanded){
          // Indented glass panel uses the exact same illuminated hover style as the main menu.
          drawMenuButton(subLayout.moonView,L"MOON VIEW",m_scenarioHover==1||m_scenarioSelected);
@@ -413,7 +430,7 @@ void Renderer::DrawHudText(){
            auto g=makeButton(r,0.0f);
            m_d2dContext->FillGeometry(g.Get(),glass.Get());
            m_d2dContext->DrawGeometry(g.Get(),muted.Get(),0.9f);
-           tracked(name,r.left+(mainLayout.textX-mainLayout.buttons[0].left),r.top+16,m_textMenu.Get(),muted.Get(),2.2f);
+           centeredButtonText(name,r,r.left+(mainLayout.textX-mainLayout.buttons[0].left),m_textMenu.Get(),muted.Get(),2.2f);
            m_d2dContext->DrawLine(D2D1::Point2F(72,r.top+31),
                D2D1::Point2F(r.left-4,r.top+31),muted.Get(),0.9f);
          };
@@ -474,8 +491,8 @@ void Renderer::DrawHudText(){
        auto a=makeButton(subLayout.graphicsWindowed,0.0f),b=makeButton(subLayout.graphicsFullscreen,0.0f);
        m_d2dContext->FillGeometry(a.Get(),!m_fullscreen?greenFill.Get():glass.Get());m_d2dContext->FillGeometry(b.Get(),m_fullscreen?greenFill.Get():glass.Get());
        m_d2dContext->DrawGeometry(a.Get(),!m_fullscreen?green.Get():muted.Get(),1.5f);m_d2dContext->DrawGeometry(b.Get(),m_fullscreen?green.Get():muted.Get(),1.5f);
-       tracked(L"WINDOWED",subLayout.graphicsWindowed.left+24,subLayout.graphicsWindowed.top+17,m_textLeft.Get(),!m_fullscreen?green.Get():white.Get(),0.8f);
-       tracked(L"FULL SCREEN",subLayout.graphicsFullscreen.left+24,subLayout.graphicsFullscreen.top+17,m_textLeft.Get(),m_fullscreen?green.Get():white.Get(),0.8f);
+       centeredButtonText(L"WINDOWED",subLayout.graphicsWindowed,subLayout.graphicsWindowed.left+24,m_textLeft.Get(),!m_fullscreen?green.Get():white.Get(),0.8f);
+       centeredButtonText(L"FULL SCREEN",subLayout.graphicsFullscreen,subLayout.graphicsFullscreen.left+24,m_textLeft.Get(),m_fullscreen?green.Get():white.Get(),0.8f);
        drawFmt(L"Changes apply immediately and are saved on exit.",subLayout.title.left,subLayout.graphicsWindowed.bottom+30,m_textLeft.Get(),white.Get());
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
