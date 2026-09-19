@@ -38,7 +38,7 @@ struct SubmenuLayout {
     float panelRight=690.0f;
     // Submenus deliberately begin below the OrbitX wordmark.  Keep this geometry
     // canonical: rendering and hit-testing consume these exact rectangles.
-    RectF back{58,215,230,270};
+    RectF back{};
     RectF title{72,305,620,350};
     RectF moonView{72,390,560,465};
     RectF graphicsWindowed{72,435,286,500};
@@ -57,7 +57,10 @@ inline MainMenuLayout BuildMainMenuLayout(float width,float height){
     return out;
 }
 inline SubmenuLayout BuildSubmenuLayout(float width,float height){
-    SubmenuLayout out{}; out.scale=ScaleFor(width,height);out.offsetX=OffsetXFor(width,out.scale);out.offsetY=OffsetYFor(height,out.scale);return out;
+    SubmenuLayout out{}; out.scale=ScaleFor(width,height);out.offsetX=OffsetXFor(width,out.scale);out.offsetY=OffsetYFor(height,out.scale);
+    // Keep every submenu BACK control identical in position and size to SCENARIOS.
+    out.back=BuildMainMenuLayout(width,height).buttons[0];
+    return out;
 }
 inline void ScreenToDesign(float sx,float sy,float scale,float ox,float oy,float& x,float& y){x=(sx-ox)/scale;y=(sy-oy)/scale;}
 inline bool PointInButton(const RectF& r,float cut,float x,float y){
