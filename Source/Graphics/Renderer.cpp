@@ -385,7 +385,8 @@ void Renderer::DrawHudText(){
    };
    // Center labels and chevrons using measured DirectWrite line-box geometry.
    auto centeredButtonText=[&](const wchar_t* value,const OrbitX::UI::RectF& r,float x,
-                               IDWriteTextFormat* fmt,ID2D1Brush* brush,float spacing){
+                               IDWriteTextFormat* fmt,ID2D1Brush* brush,float spacing,
+                               bool centerHorizontally=false){
      Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
      if(FAILED(m_dwriteFactory->CreateTextLayout(value,(UINT32)wcslen(value),fmt,
          1000.0f,120.0f,&layout)))return;
@@ -397,7 +398,8 @@ void Renderer::DrawHudText(){
      DWRITE_TEXT_METRICS metrics{};
      if(FAILED(layout->GetMetrics(&metrics)))return;
      const float y=r.top+(r.Height()-metrics.height)*0.5f-metrics.top;
-     m_d2dContext->DrawTextLayout(D2D1::Point2F(x,y),layout.Get(),brush,
+     const float drawX=centerHorizontally ? r.left+(r.Width()-metrics.width)*0.5f : x;
+     m_d2dContext->DrawTextLayout(D2D1::Point2F(drawX,y),layout.Get(),brush,
          D2D1_DRAW_TEXT_OPTIONS_NONE);
    };
    auto makeButton=[&](const OrbitX::UI::RectF& r,float inset){
@@ -442,7 +444,8 @@ void Renderer::DrawHudText(){
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+8,r.top+5),D2D1::Point2F(r.right-34,r.top+5),hot?green.Get():glassHighlight.Get(),hot?1.6f:0.8f);
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+2,r.top+9),D2D1::Point2F(r.left+2,r.bottom-9),hot?green.Get():muted.Get(),hot?4.0f:1.4f);
        centeredButtonText(label,r,r.left+(mainLayout.textX-mainLayout.buttons[0].left),
-           labelFormat?labelFormat:m_textMenu.Get(),white.Get(),labelFormat?2.5f:3.4f);
+           labelFormat?labelFormat:m_textMenu.Get(),white.Get(),labelFormat?2.5f:3.4f,
+           wcscmp(label,L"LAUNCH")==0);
        if(hot&&showHoverArrow)centeredButtonText(L">>",r,r.right-62,m_textMenu.Get(),green.Get(),0.0f);
    };
    if(m_appState==AppState::MainMenu){
@@ -512,10 +515,10 @@ void Renderer::DrawHudText(){
          m_d2dContext->FillGeometry(pg.Get(),panel.Get());
          m_d2dContext->DrawGeometry(pg.Get(),greenGlow.Get(),9.0f);
          m_d2dContext->DrawGeometry(pg.Get(),green.Get(),1.7f);
-         tracked(L"SCENARIO",p.left+34,p.top+27,m_textLeft.Get(),detail.Get(),2.6f);
-         tracked(L"MOON VIEW",p.left+34,p.top+66,m_textMenu.Get(),green.Get(),4.5f);
-         m_d2dContext->DrawLine(D2D1::Point2F(p.left+38,p.top+121),
-             D2D1::Point2F(p.right-38,p.top+121),muted.Get(),1.0f);
+         // The scenario name is the sole panel heading; remove the redundant "SCENARIO" label.
+         tracked(L"MOON VIEW",p.left+34,p.top+30,m_textMenu.Get(),green.Get(),4.5f);
+         m_d2dContext->DrawLine(D2D1::Point2F(p.left+38,p.top+85),
+             D2D1::Point2F(p.right-38,p.top+85),muted.Get(),1.0f);
          const auto& v=subLayout.preview;
          auto previewGeo=makeButton(v,0.0f);
          m_d2dContext->FillGeometry(previewGeo.Get(),previewShade.Get());
@@ -537,8 +540,8 @@ void Renderer::DrawHudText(){
            m_d2dContext->DrawTextW(value,(UINT32)wcslen(value),m_textLeft.Get(),rc,
                white.Get(),D2D1_DRAW_TEXT_OPTIONS_NONE,DWRITE_MEASURING_MODE_NATURAL);
          };
-         panelText(L"Observe the Moon from OrbitX's current\nexternal-view prototype.",p.top+325);
-         panelText(L"This scenario showcases the lunar rendering\npipeline, camera controls, and basic scene\npresentation. More solar-system flyby and\nsurface-view scenarios will be added here\nover time.",p.top+418);
+         panelText(L"Observe the Moon from OrbitX's current\nexternal-view prototype.",p.top+285);
+         panelText(L"This scenario showcases the lunar rendering\npipeline, camera controls, and basic scene\npresentation. More solar-system flyby and\nsurface-view scenarios will be added here\nover time.",p.top+378);
          m_d2dContext->DrawLine(D2D1::Point2F(p.left+32,p.bottom-63),
              D2D1::Point2F(p.right-30,p.bottom-63),muted.Get(),1.0f);
          tracked(L"SOLAR SYSTEM",p.left+38,p.bottom-47,m_textLeft.Get(),detail.Get(),2.0f);

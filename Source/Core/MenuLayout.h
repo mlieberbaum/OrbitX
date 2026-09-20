@@ -41,13 +41,13 @@ struct SubmenuLayout {
     RectF back{};
     RectF title{72,347,620,392};
     // Scenario browser: design-space rectangles shared by rendering and hit-testing.
-    RectF solarSystem{52,445,978,519};
-    RectF moonView{100,540,958,594};
-    RectF earthView{100,605,958,659}; // Future scenario: visible but disabled.
-    RectF marsView{100,670,958,724};  // Future scenario: visible but disabled.
-    RectF description{1040,338,1572,990};
-    RectF preview{1072,462,1540,632};
-    RectF launch{1620,905,1880,988};
+    RectF solarSystem{52,445,800,519};
+    RectF moonView{100,540,780,594};
+    RectF earthView{100,605,780,659}; // Future scenario: visible but disabled.
+    RectF marsView{100,670,780,724};  // Future scenario: visible but disabled.
+    RectF description{860,338,1392,950};
+    RectF preview{892,422,1360,592};
+    RectF launch{1440,865,1700,948};
     RectF graphicsWindowed{72,477,286,542};
     RectF graphicsFullscreen{304,477,550,542};
 };
