@@ -462,20 +462,16 @@ void Renderer::DrawHudText(){
      centeredButtonText(L"<<",subLayout.back,subLayout.back.left+18,m_textMenu.Get(),green.Get(),0.0f);
      const wchar_t* title=L"";
      if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"HARDWARE"; else if(m_appState==AppState::Extra)title=L"EXTRA";
-     if(m_appState==AppState::ScenarioSelect){
-       // Underline only the SCENARIOS heading, retaining the existing header font.
-       Microsoft::WRL::ComPtr<IDWriteTextLayout> heading;
-       const UINT32 titleLength=(UINT32)wcslen(title);
-       if(SUCCEEDED(m_dwriteFactory->CreateTextLayout(title,titleLength,m_textScenarioTitle.Get(),1000.0f,120.0f,&heading))){
-         const DWRITE_TEXT_RANGE headingRange{0,titleLength};
-         heading->SetUnderline(TRUE,headingRange);
-         Microsoft::WRL::ComPtr<IDWriteTextLayout1> headingSpacing;
-         if(SUCCEEDED(heading.As(&headingSpacing)))headingSpacing->SetCharacterSpacing(0.0f,3.0f,0.0f,headingRange);
-         m_d2dContext->DrawTextLayout(D2D1::Point2F(subLayout.title.left,subLayout.title.top),
-                                       heading.Get(),white.Get(),D2D1_DRAW_TEXT_OPTIONS_NONE);
-       }
-     }else{
-       tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
+     // All submenu headings use the same size, position, tracking, and underline.
+     Microsoft::WRL::ComPtr<IDWriteTextLayout> heading;
+     const UINT32 titleLength=(UINT32)wcslen(title);
+     if(SUCCEEDED(m_dwriteFactory->CreateTextLayout(title,titleLength,m_textScenarioTitle.Get(),1000.0f,120.0f,&heading))){
+       const DWRITE_TEXT_RANGE headingRange{0,titleLength};
+       heading->SetUnderline(TRUE,headingRange);
+       Microsoft::WRL::ComPtr<IDWriteTextLayout1> headingSpacing;
+       if(SUCCEEDED(heading.As(&headingSpacing)))headingSpacing->SetCharacterSpacing(0.0f,3.0f,0.0f,headingRange);
+       m_d2dContext->DrawTextLayout(D2D1::Point2F(subLayout.title.left,subLayout.title.top),
+                                     heading.Get(),white.Get(),D2D1_DRAW_TEXT_OPTIONS_NONE);
      }
      if(m_appState==AppState::ScenarioSelect){
        // Expandable category and nested selectable scenario; no decorative planet icons.
