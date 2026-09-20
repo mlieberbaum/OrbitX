@@ -7,7 +7,7 @@ on:
       - feature/ui-polish-01
     paths:
       - .github/workflows/build-header-font.yml
-      - tools/fonts/OrbitX_Header_Font_P9_Builder.py
+      - tools/fonts/OrbitX_Header_Font_P10_Builder.py
 
 jobs:
   build:
@@ -21,48 +21,64 @@ jobs:
           python-version: '3.12'
       - name: Install font-building dependencies
         run: |
-          python -m pip install 'fonttools==4.59.2'
+          python -m pip install 'fonttools==4.59.2' 'pillow==11.3.0'
           sudo apt-get update -qq
           sudo apt-get install -y fonts-dejavu-core
       - name: Check builder sources
         run: |
           test -f tools/fonts/OrbitX_Header_Font_Builder.py
           test -f tools/fonts/OrbitX_Header_Font_P8_Builder.py
-          test -f tools/fonts/OrbitX_Header_Font_P9_Builder.py
-      - name: Build OrbitX Header Font P9
-        run: python tools/fonts/OrbitX_Header_Font_P9_Builder.py
-      - name: Verify P9 TTF and unchanged P7/P8 spacing
+          test -f tools/fonts/OrbitX_Header_Font_P10_Builder.py
+      - name: Build OrbitX Header Font P10
+        run: python tools/fonts/OrbitX_Header_Font_P10_Builder.py
+      - name: Verify glyphs and reference audit
         run: |
           python - <<'PY'
           from pathlib import Path
           from fontTools.ttLib import TTFont
+          from PIL import Image, ImageDraw, ImageFont
           directory=Path('tools/fonts')
-          p8=directory/'OrbitX_Header_Font_Prototype_8.ttf'
-          p9=directory/'OrbitX_Header_Font_Prototype_9.ttf'
-          assert p8.is_file() and p9.is_file(), 'Font builder did not generate both files'
-          a,b=TTFont(p8),TTFont(p9)
-          assert b['name'].getDebugName(1)=='OrbitX Header Font P9'
+          old=directory/'OrbitX_Header_Font_Prototype_8.ttf'
+          new=directory/'OrbitX_Header_Font_Prototype_10.ttf'
+          assert old.is_file() and new.is_file(), 'Missing expected font outputs'
+          a,b=TTFont(old),TTFont(new)
+          assert b['name'].getDebugName(1)=='OrbitX Header Font P10'
           assert b['OS/2'].fsType==0
           assert b['maxp'].numGlyphs>1000
+          unchanged='AHIKMNTVWXYZ'
+          changed='BCDEFGJLOPQRSU'
           for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789':
-              assert ord(ch) in b.getBestCmap(), f'Missing {ch}'
-              left=a.getBestCmap()[ord(ch)]
-              right=b.getBestCmap()[ord(ch)]
-              assert a['hmtx'][left]==b['hmtx'][right], f'Spacing changed for {ch}'
-          for ch in 'AMNX':
-              left=a.getBestCmap()[ord(ch)]
-              right=b.getBestCmap()[ord(ch)]
-              assert list(a['glyf'][left].coordinates)==list(b['glyf'][right].coordinates), f'Angular glyph {ch} changed'
-          c0=a['glyf'][a.getBestCmap()[ord('C')]]
-          c1=b['glyf'][b.getBestCmap()[ord('C')]]
-          assert list(c0.coordinates)!=list(c1.coordinates), 'C corner radius did not change'
+              assert ord(ch) in b.getBestCmap(), f'Missing glyph: {ch}'
+              g0,g1=a.getBestCmap()[ord(ch)],b.getBestCmap()[ord(ch)]
+              assert a['hmtx'][g0]==b['hmtx'][g1], f'Spacing changed: {ch}'
+              if ch in unchanged or ch.isdigit():
+                  assert list(a['glyf'][g0].coordinates)==list(b['glyf'][g1].coordinates),f'Unexpected modification: {ch}'
+          def ncurves(ch):
+              glyph=b['glyf'][b.getBestCmap()[ord(ch)]]
+              return sum((flag&1)==0 for flag in glyph.flags)
+          for ch in changed:
+              assert ncurves(ch)>0, f'Reference-rounded glyph lacks smooth Bézier contours: {ch}'
+          assert ncurves('C') >= 4 and ncurves('E') >= 2, 'Missing rebuilt C/E curves'
+          assert ncurves('M') == ncurves('N') == 0
           a.close();b.close()
-          print('P9 TTF valid. Curves enlarged; widths, bearings, and angular letters unchanged.')
-          print('Microsoft Word rendering still requires a Windows test.')
+          # Render the ACTUAL TrueType file, not a synthetic conceptual mockup.
+          font=ImageFont.truetype(str(new),88)
+          lines=['ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz',
+                 'C C C    E E E    B D G O P Q R S U','ORBITX  SCENARIOS  VISUAL  EFFECTS']
+          widths=[ImageDraw.Draw(Image.new('RGB',(10,10))).textbbox((0,0),line,font=font)[2] for line in lines]
+          image=Image.new('RGB',(max(widths)+72,500),'#ffffff')
+          draw=ImageDraw.Draw(image)
+          for idx,line in enumerate(lines):
+              draw.text((35,22+idx*112),line,font=font,fill='#111111')
+          image.save(directory/'OrbitX_Header_Font_P10_Preview.png')
+          print('P10 curves, glyph coverage, unchanged angular letters and ALL 62 metrics verified.')
+          print('This is not an MS Word test; confirm appearance on Windows before approval.')
           PY
-      - name: Publish downloadable P9 TTF
+      - name: Publish Word-test font and actual-font preview
         uses: actions/upload-artifact@v4
         with:
-          name: OrbitX-Header-Font-P9-TTF
-          path: tools/fonts/OrbitX_Header_Font_Prototype_9.ttf
+          name: OrbitX-Header-Font-P10-TTF
+          path: |
+            tools/fonts/OrbitX_Header_Font_Prototype_10.ttf
+            tools/fonts/OrbitX_Header_Font_P10_Preview.png
           if-no-files-found: error
