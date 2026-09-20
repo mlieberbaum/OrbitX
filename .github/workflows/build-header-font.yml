@@ -1,4 +1,4 @@
-name: Build OrbitX header font
+name: Package OrbitX Header font for the application
 
 on:
   workflow_dispatch:
@@ -7,80 +7,66 @@ on:
       - feature/ui-polish-01
     paths:
       - .github/workflows/build-header-font.yml
+      - tools/fonts/package_orbitx_header.py
       - tools/fonts/OrbitX_Header_Font_P11_Builder.py
 
+concurrency:
+  group: orbitx-header-asset-feature-ui-polish-01
+  cancel-in-progress: false
+
 jobs:
-  build:
+  package-font:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/ui-polish-01
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install font-building dependencies
+      - name: Install font-generation dependencies
         run: |
           python -m pip install 'fonttools==4.59.2' 'pillow==11.3.0'
           sudo apt-get update -qq
           sudo apt-get install -y fonts-dejavu-core
-      - name: Check builder sources
-        run: |
-          test -f tools/fonts/OrbitX_Header_Font_Builder.py
-          test -f tools/fonts/OrbitX_Header_Font_P8_Builder.py
-          test -f tools/fonts/OrbitX_Header_Font_P10_Builder.py
-          test -f tools/fonts/OrbitX_Header_Font_P11_Builder.py
-      - name: Build OrbitX Header Font P11
-        run: python tools/fonts/OrbitX_Header_Font_P11_Builder.py
-      - name: Verify metrics and exactly the intended glyph changes
+      - name: Build and rename approved P11 font
+        run: python tools/fonts/package_orbitx_header.py
+      - name: Verify install-free runtime asset
         run: |
           python - <<'PY'
           from pathlib import Path
           from fontTools.ttLib import TTFont
-          from PIL import Image,ImageFont,ImageDraw
+          from PIL import ImageFont
 
-          root=Path('tools/fonts')
-          a=TTFont(root/'OrbitX_Header_Font_Prototype_10.ttf')
-          b=TTFont(root/'OrbitX_Header_Font_Prototype_11.ttf')
-          assert b['name'].getDebugName(1)=='OrbitX Header Font P11'
-          assert b['OS/2'].fsType==0
-          assert b['maxp'].numGlyphs>1000
-          changed=set('ABGJKQRSU038')
-          for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789':
-              aa=a.getBestCmap().get(ord(ch))
-              bb=b.getBestCmap().get(ord(ch))
-              assert aa and bb, f'Missing character {ch}'
-              assert a['hmtx'][aa]==b['hmtx'][bb], f'Spacing changed: {ch}'
-              old=a['glyf'][aa];new=b['glyf'][bb]
-              if ch not in changed:
-                  assert list(old.coordinates)==list(new.coordinates),f'Unrequested glyph changed: {ch}'
-                  assert list(old.flags)==list(new.flags),f'Unrequested glyph flags changed: {ch}'
-              else:
-                  assert (list(old.coordinates)!=list(new.coordinates) or list(old.flags)!=list(new.flags)),f'Edited glyph is identical to P10: {ch}'
-          c=b.getBestCmap()
-          assert b['glyf'][c[ord('0')]].numberOfContours>=3,'Slashed zero contour missing'
-          assert b['glyf'][c[ord('B')]].numberOfContours==3,'B counters missing'
-          assert b['glyf'][c[ord('8')]].numberOfContours==3,'8 counters missing'
-          a.close();b.close()
-
-          font=ImageFont.truetype(str(root/'OrbitX_Header_Font_Prototype_11.ttf'),75)
-          rows=['AAA BBB GGG JJJ KKK QQQ', 'RRR SSS UUU 000 333 888',
-                'SCENARIOS   ORBITX   VISUAL', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-                '0123456789']
-          width=max(ImageDraw.Draw(Image.new('RGB',(1,1))).textbbox((0,0),s,font=font)[2] for s in rows)
-          img=Image.new('RGB',(width+60,len(rows)*100+35),'white')
-          d=ImageDraw.Draw(img)
-          for idx,s in enumerate(rows):
-              d.text((30,10+idx*100),s,font=font,fill='black')
-          img.save(root/'OrbitX_Header_Font_P11_Preview.png')
-          print('P11 verified: spacing unchanged; ONLY the requested uppercase/numerals modified.')
-          print('P11 actual-font preview generated; Word rendering requires Windows test.')
+          root=Path('Runtime/Fonts')
+          path=root/'OrbitXHeader.ttf'
+          assert path.is_file(), 'Missing Runtime/Fonts/OrbitXHeader.ttf'
+          assert (root/'FONT-LICENSE.txt').is_file(), 'Missing font redistribution notice'
+          f=TTFont(path)
+          names=f['name']
+          assert names.getDebugName(1)=='OrbitX Header'
+          assert names.getDebugName(4)=='OrbitX Header'
+          assert names.getDebugName(6)=='OrbitXHeader-Regular'
+          assert f['OS/2'].fsType==0
+          assert all(ord(c) in f.getBestCmap()
+                     for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
+          assert f['maxp'].numGlyphs > 1000
+          f.close()
+          ImageFont.truetype(str(path),32).getbbox('ORBITX 0123456789')
+          print('Verified approved P11 font outlines, metrics, naming and runtime file.')
+          print('Windows DirectWrite rendering requires a Windows runtime test.')
           PY
-      - name: Publish installable P11 TTF and actual-font preview
-        uses: actions/upload-artifact@v4
-        with:
-          name: OrbitX-Header-Font-P11-TTF
-          path: |
-            tools/fonts/OrbitX_Header_Font_Prototype_11.ttf
-            tools/fonts/OrbitX_Header_Font_P11_Preview.png
-          if-no-files-found: error
+      - name: Commit finalized font asset to existing feature branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- Runtime/Fonts/OrbitXHeader.ttf
+          if git diff --cached --quiet; then
+            echo "The exact font asset is already committed; no changes necessary."
+          else
+            git commit -m "Add OrbitX Header .ttf font for bundled UI rendering"
+            git push origin HEAD:refs/heads/feature/ui-polish-01
+          fi
