@@ -93,6 +93,42 @@ bool Renderer::LoadTextureWIC(const std::wstring&path){
 bool Renderer::CreateDepth(){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;d.Width=m_width;d.Height=m_height;d.DepthOrArraySize=1;d.MipLevels=1;d.Format=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.Flags=D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;D3D12_CLEAR_VALUE cv{};cv.Format=d.Format;cv.DepthStencil.Depth=1;auto hp=Heap(D3D12_HEAP_TYPE_DEFAULT);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_DEPTH_WRITE,&cv,IID_PPV_ARGS(&m_depth))))return false;m_device->CreateDepthStencilView(m_depth.Get(),nullptr,m_dsvHeap->GetCPUDescriptorHandleForHeapStart());return true;}
 bool Renderer::CreateConstantBuffer(){auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto d=BufferDesc(256);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_cb))))return false;m_cb->Map(0,nullptr,(void**)&m_cbPtr);return true;}
 
+// Load the tracked TrueType asset into a private DirectWrite collection. Users do
+// not need to install OrbitX Header, and the app never changes Windows font state.
+bool Renderer::LoadBundledHeaderFont(){
+ const std::wstring path=m_root+L"\\Fonts\\OrbitXHeader.ttf";
+ if(!std::filesystem::is_regular_file(std::filesystem::path(path))){
+  SetError("OrbitX Header font asset missing: Runtime/Fonts/OrbitXHeader.ttf");
+  return false;
+ }
+ Microsoft::WRL::ComPtr<IDWriteFactory3> factory3;
+ HRESULT hr=m_dwriteFactory.As(&factory3);
+ if(FAILED(hr)){SetError("IDWriteFactory3 unavailable: "+HrText(hr));return false;}
+ Microsoft::WRL::ComPtr<IDWriteFontFile> fontFile;
+ hr=factory3->CreateFontFileReference(path.c_str(),nullptr,&fontFile);
+ if(FAILED(hr)){SetError("Load OrbitX Header font file: "+HrText(hr));return false;}
+ BOOL supported=FALSE;DWRITE_FONT_FILE_TYPE type{};UINT32 faceCount=0;
+ hr=fontFile->Analyze(&supported,&type,nullptr,&faceCount);
+ if(FAILED(hr)||!supported||faceCount!=1){SetError("OrbitX Header asset is not a supported single-face font.");return false;}
+ Microsoft::WRL::ComPtr<IDWriteFontFaceReference> face;
+ hr=factory3->CreateFontFaceReference(fontFile.Get(),0,DWRITE_FONT_SIMULATIONS_NONE,&face);
+ if(FAILED(hr)){SetError("Create OrbitX Header face reference: "+HrText(hr));return false;}
+ Microsoft::WRL::ComPtr<IDWriteFontSetBuilder> builder;
+ hr=factory3->CreateFontSetBuilder(&builder);
+ if(FAILED(hr)){SetError("Create OrbitX Header font set builder: "+HrText(hr));return false;}
+ hr=builder->AddFontFaceReference(face.Get());
+ if(FAILED(hr)){SetError("Add OrbitX Header font face: "+HrText(hr));return false;}
+ Microsoft::WRL::ComPtr<IDWriteFontSet> fontSet;
+ hr=builder->CreateFontSet(&fontSet);
+ if(FAILED(hr)){SetError("Create OrbitX Header font set: "+HrText(hr));return false;}
+ hr=factory3->CreateFontCollectionFromFontSet(fontSet.Get(),&m_headerFontCollection);
+ if(FAILED(hr)){SetError("Create OrbitX Header collection: "+HrText(hr));return false;}
+ UINT32 familyIndex=0;BOOL exists=FALSE;
+ hr=m_headerFontCollection->FindFamilyName(L"OrbitX Header",&familyIndex,&exists);
+ if(FAILED(hr)||!exists){SetError("Bundled font does not contain the OrbitX Header family.");return false;}
+ return true;
+}
+
 bool Renderer::InitVectorText(){
  UINT flags=D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #if defined(_DEBUG)
@@ -118,6 +154,7 @@ bool Renderer::InitVectorText(){
  if(FAILED(m_d3d11Device.As(&dxgiDevice))||FAILED(m_d2dFactory->CreateDevice(dxgiDevice.Get(),&m_d2dDevice))||FAILED(m_d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,&m_d2dContext))){SetError("Direct2D device creation failed");return false;}
  hr=DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),reinterpret_cast<IUnknown**>(m_dwriteFactory.GetAddressOf()));
  if(FAILED(hr)){SetError("DWriteCreateFactory: "+HrText(hr));return false;}
+ if(!LoadBundledHeaderFont())return false;
 
  // Restore the original requested "size 2" HUD scale.  The prior size 1.25
  // DirectWrite HUD used 12 DIP, so size 2 on the same scale is 19.2 DIP.
@@ -128,13 +165,14 @@ bool Renderer::InitVectorText(){
  if(FAILED(hr))return false;
  m_textLeft->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);m_textLeft->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
  m_textRight->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);m_textRight->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
- // OrbitX front-end typography. All UI remains DirectWrite vector text; no text is baked into artwork.
- hr=m_dwriteFactory->CreateTextFormat(L"Bahnschrift",nullptr,DWRITE_FONT_WEIGHT_SEMI_BOLD,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_EXPANDED,88.0f,L"en-us",&m_textLogo);
- if(FAILED(hr))return false;
- hr=m_dwriteFactory->CreateTextFormat(L"Bahnschrift",nullptr,DWRITE_FONT_WEIGHT_BOLD,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_EXPANDED,100.0f,L"en-us",&m_textLogoX);
- if(FAILED(hr))return false;
- hr=m_dwriteFactory->CreateTextFormat(L"Bahnschrift",nullptr,DWRITE_FONT_WEIGHT_LIGHT,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_EXPANDED,24.0f,L"en-us",&m_textMenu);
- if(FAILED(hr))return false;
+ // The P11 OrbitX Header font is loaded from Runtime/Fonts via a private app-only
+ // collection. Do not use the system collection here: Windows font installation is optional.
+ hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,88.0f,L"en-us",&m_textLogo);
+ if(FAILED(hr)){SetError("OrbitX Header logo format: "+HrText(hr));return false;}
+ hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,100.0f,L"en-us",&m_textLogoX);
+ if(FAILED(hr)){SetError("OrbitX Header logo X format: "+HrText(hr));return false;}
+ hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,24.0f,L"en-us",&m_textMenu);
+ if(FAILED(hr)){SetError("OrbitX Header menu format: "+HrText(hr));return false;}
  m_textLogo->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); m_textLogoX->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); m_textMenu->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
  // OrbitX is Per-Monitor-V2 DPI aware, so the swap-chain dimensions are physical pixels.
