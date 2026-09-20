@@ -9,6 +9,7 @@
 #include <d2d1_3.h>
 #include <dwrite.h>
 #include <dwrite_1.h>
+#include <dwrite_3.h>
 #include <DirectXMath.h>
 #include <vector>
 #include <string>
@@ -37,7 +38,7 @@ private:
     struct Vertex { DirectX::XMFLOAT3 pos, normal; DirectX::XMFLOAT2 uv; };
     struct SceneCB { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 model; DirectX::XMFLOAT4 sunDir; };
     bool InitDevice(); bool InitAssets(); bool CreateSphere(); bool LoadTextureWIC(const std::wstring& path);
-    bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo(); bool LoadScenarioPreview();
+    bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool LoadBundledHeaderFont(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo(); bool LoadScenarioPreview();
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);
 
@@ -59,6 +60,8 @@ private:
     Microsoft::WRL::ComPtr<ID2D1Device2> m_d2dDevice;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext2> m_d2dContext;
     Microsoft::WRL::ComPtr<IDWriteFactory> m_dwriteFactory;
+    // Private app-only collection: does not install or register fonts in Windows.
+    Microsoft::WRL::ComPtr<IDWriteFontCollection1> m_headerFontCollection;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> m_textLeft,m_textRight,m_textLogo,m_textLogoX,m_textMenu;
     Microsoft::WRL::ComPtr<IDWriteRenderingParams> m_textRenderingParams;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_textBrush;
