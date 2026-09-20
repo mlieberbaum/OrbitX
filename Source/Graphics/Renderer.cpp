@@ -548,12 +548,24 @@ void Renderer::DrawHudText(){
          drawMenuButton(launch,L"LAUNCH",m_scenarioHover==2);
        }
      }else if(m_appState==AppState::Graphics){
+       // Keep the display controls below the enlarged, underlined GRAPHICS heading.
        drawFmt(L"DISPLAY MODE",subLayout.title.left,subLayout.graphicsWindowed.top-65,m_textLeft.Get(),white.Get());
-       auto a=makeButton(subLayout.graphicsWindowed,0.0f),b=makeButton(subLayout.graphicsFullscreen,0.0f);
-       m_d2dContext->FillGeometry(a.Get(),!m_fullscreen?greenFill.Get():glass.Get());m_d2dContext->FillGeometry(b.Get(),m_fullscreen?greenFill.Get():glass.Get());
-       m_d2dContext->DrawGeometry(a.Get(),!m_fullscreen?green.Get():muted.Get(),1.5f);m_d2dContext->DrawGeometry(b.Get(),m_fullscreen?green.Get():muted.Get(),1.5f);
-       centeredButtonText(L"WINDOWED",subLayout.graphicsWindowed,subLayout.graphicsWindowed.left+24,m_textLeft.Get(),!m_fullscreen?green.Get():white.Get(),0.8f);
-       centeredButtonText(L"FULL SCREEN",subLayout.graphicsFullscreen,subLayout.graphicsFullscreen.left+24,m_textLeft.Get(),m_fullscreen?green.Get():white.Get(),0.8f);
+       auto drawDisplayOption=[&](const OrbitX::UI::RectF& rect,const wchar_t* label,bool selected,bool hovered){
+         auto shape=makeButton(rect,0.0f);
+         m_d2dContext->FillGeometry(shape.Get(),selected||hovered?greenFill.Get():glass.Get());
+         if(hovered){
+           // Use the same layered neon glow as the main-menu hover treatment.
+           m_d2dContext->DrawGeometry(shape.Get(),greenGlow.Get(),12.0f);
+           m_d2dContext->DrawGeometry(shape.Get(),greenGlow2.Get(),5.0f);
+           m_d2dContext->DrawGeometry(shape.Get(),green.Get(),1.6f);
+         }else{
+           m_d2dContext->DrawGeometry(shape.Get(),selected?green.Get():muted.Get(),1.5f);
+         }
+         centeredButtonText(label,rect,rect.left+24,m_textLeft.Get(),
+                            selected||hovered?green.Get():white.Get(),0.8f);
+       };
+       drawDisplayOption(subLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
+       drawDisplayOption(subLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
        drawFmt(L"Changes apply immediately and are saved on exit.",subLayout.title.left,subLayout.graphicsWindowed.bottom+30,m_textLeft.Get(),white.Get());
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
@@ -637,7 +649,7 @@ void Renderer::OnKeyDown(WPARAM k){
    return;
  }
  if(m_appState==AppState::Simulation)return;
- if(m_appState==AppState::MainMenu){if(k==VK_UP){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+OrbitX::UI::kMainMenuCount-1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_DOWN){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_RETURN){if(m_menuSelection==OrbitX::UI::kMainMenuCount-1){PostMessage(m_hwnd,WM_CLOSE,0,0);return;}static const AppState states[]={AppState::ScenarioSelect,AppState::Parameters,AppState::VisualEffects,AppState::Modules,AppState::Graphics,AppState::Joystick,AppState::Extra};m_appState=states[m_menuSelection];if(m_appState==AppState::ScenarioSelect){m_solarSystemExpanded=false;m_scenarioSelected=false;m_scenarioHover=-1;}m_hoverSelection=-1;m_mouseNavigation=false;}return;}
+ if(m_appState==AppState::MainMenu){if(k==VK_UP){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+OrbitX::UI::kMainMenuCount-1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_DOWN){m_mouseNavigation=false;m_menuSelection=(m_menuSelection+1)%OrbitX::UI::kMainMenuCount;}else if(k==VK_RETURN){if(m_menuSelection==OrbitX::UI::kMainMenuCount-1){PostMessage(m_hwnd,WM_CLOSE,0,0);return;}static const AppState states[]={AppState::ScenarioSelect,AppState::Parameters,AppState::VisualEffects,AppState::Modules,AppState::Graphics,AppState::Joystick,AppState::Extra};m_appState=states[m_menuSelection];if(m_appState==AppState::ScenarioSelect){m_solarSystemExpanded=false;m_scenarioSelected=false;m_scenarioHover=-1;}m_hoverSelection=-1;m_graphicsHover=-1;m_mouseNavigation=false;}return;}
  // A scenario is launched only with the explicit LAUNCH control, never by selecting it.
 }
 void Renderer::OnLeftClick(int x,int y){
@@ -648,7 +660,7 @@ void Renderer::OnLeftClick(int x,int y){
    if(hit>=0){m_menuSelection=hit;OnKeyDown(VK_RETURN);} return;
  }
  const auto layout=OrbitX::UI::BuildSubmenuLayout((float)m_width,(float)m_height);
- if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;m_scenarioHover=-1;m_mouseNavigation=false;return;}
+ if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;return;}
  if(m_appState==AppState::ScenarioSelect){
    const auto hit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
    if(hit(layout.solarSystem)){m_solarSystemExpanded=!m_solarSystemExpanded;m_scenarioHover=-1;return;}
@@ -697,6 +709,11 @@ void Renderer::OnMouseMove(int x,int y){
    const auto hit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
    m_hoverSelection=hit(layout.back)?0:-1;
    m_scenarioHover=-1;
+   m_graphicsHover=-1;
+   if(m_appState==AppState::Graphics){
+     if(hit(layout.graphicsWindowed))m_graphicsHover=0;
+     else if(hit(layout.graphicsFullscreen))m_graphicsHover=1;
+   }
    if(m_appState==AppState::ScenarioSelect){
      if(hit(layout.solarSystem))m_scenarioHover=0;
      else if(m_solarSystemExpanded&&hit(layout.moonView))m_scenarioHover=1;
@@ -719,7 +736,7 @@ void Renderer::OnMouseMove(int x,int y){
  m_pitch=fmodf(m_pitch,twoPi);if(m_pitch<0.0f)m_pitch+=twoPi;
  SetCursorPos(m_dragAnchorScreen.x,m_dragAnchorScreen.y);
 }
-void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_scenarioHover=-1;m_mouseNavigation=false;}}
+void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;}}
 
 void Renderer::OnMouseWheel(short d){if(m_appState!=AppState::Simulation)return;m_distanceKm=std::clamp(m_distanceKm*(d>0?.90f:1.10f),1800.0f,500000.0f);}
 }
