@@ -81,6 +81,7 @@ private:
     bool m_solarSystemExpanded=false;
     bool m_scenarioSelected=false;
     int m_scenarioHover=-1; // 0: category, 1: Moon View, 2: Launch
+    int m_graphicsHover=-1; // 0: WINDOWED, 1: FULL SCREEN, -1: neither
     bool m_mouseNavigation=false;
     bool m_fullscreen=false; WINDOWPLACEMENT m_windowedPlacement{sizeof(WINDOWPLACEMENT)}; DWORD m_windowedStyle=WS_OVERLAPPEDWINDOW;
     bool m_drag=false; POINT m_dragAnchorScreen{};
