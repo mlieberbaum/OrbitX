@@ -7,7 +7,7 @@ on:
       - feature/ui-polish-01
     paths:
       - .github/workflows/build-header-font.yml
-      - tools/fonts/OrbitX_Header_Font_P10_Builder.py
+      - tools/fonts/OrbitX_Header_Font_P11_Builder.py
 
 jobs:
   build:
@@ -29,56 +29,58 @@ jobs:
           test -f tools/fonts/OrbitX_Header_Font_Builder.py
           test -f tools/fonts/OrbitX_Header_Font_P8_Builder.py
           test -f tools/fonts/OrbitX_Header_Font_P10_Builder.py
-      - name: Build OrbitX Header Font P10
-        run: python tools/fonts/OrbitX_Header_Font_P10_Builder.py
-      - name: Verify glyphs and reference audit
+          test -f tools/fonts/OrbitX_Header_Font_P11_Builder.py
+      - name: Build OrbitX Header Font P11
+        run: python tools/fonts/OrbitX_Header_Font_P11_Builder.py
+      - name: Verify metrics and exactly the intended glyph changes
         run: |
           python - <<'PY'
           from pathlib import Path
           from fontTools.ttLib import TTFont
-          from PIL import Image, ImageDraw, ImageFont
-          directory=Path('tools/fonts')
-          old=directory/'OrbitX_Header_Font_Prototype_8.ttf'
-          new=directory/'OrbitX_Header_Font_Prototype_10.ttf'
-          assert old.is_file() and new.is_file(), 'Missing expected font outputs'
-          a,b=TTFont(old),TTFont(new)
-          assert b['name'].getDebugName(1)=='OrbitX Header Font P10'
+          from PIL import Image,ImageFont,ImageDraw
+
+          root=Path('tools/fonts')
+          a=TTFont(root/'OrbitX_Header_Font_Prototype_10.ttf')
+          b=TTFont(root/'OrbitX_Header_Font_Prototype_11.ttf')
+          assert b['name'].getDebugName(1)=='OrbitX Header Font P11'
           assert b['OS/2'].fsType==0
           assert b['maxp'].numGlyphs>1000
-          unchanged='AHIKMNTVWXYZ'
-          changed='BCDEFGJLOPQRSU'
+          changed=set('ABGJKQRSU038')
           for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789':
-              assert ord(ch) in b.getBestCmap(), f'Missing glyph: {ch}'
-              g0,g1=a.getBestCmap()[ord(ch)],b.getBestCmap()[ord(ch)]
-              assert a['hmtx'][g0]==b['hmtx'][g1], f'Spacing changed: {ch}'
-              if ch in unchanged or ch.isdigit():
-                  assert list(a['glyf'][g0].coordinates)==list(b['glyf'][g1].coordinates),f'Unexpected modification: {ch}'
-          def ncurves(ch):
-              glyph=b['glyf'][b.getBestCmap()[ord(ch)]]
-              return sum((flag&1)==0 for flag in glyph.flags)
-          for ch in changed:
-              assert ncurves(ch)>0, f'Reference-rounded glyph lacks smooth Bézier contours: {ch}'
-          assert ncurves('C') >= 4 and ncurves('E') >= 2, 'Missing rebuilt C/E curves'
-          assert ncurves('M') == ncurves('N') == 0
+              aa=a.getBestCmap().get(ord(ch))
+              bb=b.getBestCmap().get(ord(ch))
+              assert aa and bb, f'Missing character {ch}'
+              assert a['hmtx'][aa]==b['hmtx'][bb], f'Spacing changed: {ch}'
+              old=a['glyf'][aa];new=b['glyf'][bb]
+              if ch not in changed:
+                  assert list(old.coordinates)==list(new.coordinates),f'Unrequested glyph changed: {ch}'
+                  assert list(old.flags)==list(new.flags),f'Unrequested glyph flags changed: {ch}'
+              else:
+                  assert (list(old.coordinates)!=list(new.coordinates) or list(old.flags)!=list(new.flags)),f'Edited glyph is identical to P10: {ch}'
+          c=b.getBestCmap()
+          assert b['glyf'][c[ord('0')]].numberOfContours>=3,'Slashed zero contour missing'
+          assert b['glyf'][c[ord('B')]].numberOfContours==3,'B counters missing'
+          assert b['glyf'][c[ord('8')]].numberOfContours==3,'8 counters missing'
           a.close();b.close()
-          # Render the ACTUAL TrueType file, not a synthetic conceptual mockup.
-          font=ImageFont.truetype(str(new),88)
-          lines=['ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz',
-                 'C C C    E E E    B D G O P Q R S U','ORBITX  SCENARIOS  VISUAL  EFFECTS']
-          widths=[ImageDraw.Draw(Image.new('RGB',(10,10))).textbbox((0,0),line,font=font)[2] for line in lines]
-          image=Image.new('RGB',(max(widths)+72,500),'#ffffff')
-          draw=ImageDraw.Draw(image)
-          for idx,line in enumerate(lines):
-              draw.text((35,22+idx*112),line,font=font,fill='#111111')
-          image.save(directory/'OrbitX_Header_Font_P10_Preview.png')
-          print('P10 curves, glyph coverage, unchanged angular letters and ALL 62 metrics verified.')
-          print('This is not an MS Word test; confirm appearance on Windows before approval.')
+
+          font=ImageFont.truetype(str(root/'OrbitX_Header_Font_Prototype_11.ttf'),75)
+          rows=['AAA BBB GGG JJJ KKK QQQ', 'RRR SSS UUU 000 333 888',
+                'SCENARIOS   ORBITX   VISUAL', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                '0123456789']
+          width=max(ImageDraw.Draw(Image.new('RGB',(1,1))).textbbox((0,0),s,font=font)[2] for s in rows)
+          img=Image.new('RGB',(width+60,len(rows)*100+35),'white')
+          d=ImageDraw.Draw(img)
+          for idx,s in enumerate(rows):
+              d.text((30,10+idx*100),s,font=font,fill='black')
+          img.save(root/'OrbitX_Header_Font_P11_Preview.png')
+          print('P11 verified: spacing unchanged; ONLY the requested uppercase/numerals modified.')
+          print('P11 actual-font preview generated; Word rendering requires Windows test.')
           PY
-      - name: Publish Word-test font and actual-font preview
+      - name: Publish installable P11 TTF and actual-font preview
         uses: actions/upload-artifact@v4
         with:
-          name: OrbitX-Header-Font-P10-TTF
+          name: OrbitX-Header-Font-P11-TTF
           path: |
-            tools/fonts/OrbitX_Header_Font_Prototype_10.ttf
-            tools/fonts/OrbitX_Header_Font_P10_Preview.png
+            tools/fonts/OrbitX_Header_Font_Prototype_11.ttf
+            tools/fonts/OrbitX_Header_Font_P11_Preview.png
           if-no-files-found: error
