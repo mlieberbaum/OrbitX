@@ -47,7 +47,7 @@ struct SubmenuLayout {
     RectF marsView{100,670,780,724};  // Future scenario: visible but disabled.
     RectF description{860,338,1392,950};
     RectF preview{892,422,1360,592};
-    RectF launch{1440,865,1700,948};
+    RectF launch{1440,865,1800,948};
     RectF graphicsWindowed{72,542,286,607};
     RectF graphicsFullscreen{304,542,550,607};
 };
