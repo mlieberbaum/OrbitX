@@ -176,7 +176,7 @@ bool Renderer::InitVectorText(){
  // Scenario list labels are smaller than main-menu labels; the submenu heading is larger.
  hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,20.0f,L"en-us",&m_textScenarioButton);
  if(FAILED(hr)){SetError("OrbitX Header scenario button format: "+HrText(hr));return false;}
- hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,34.0f,L"en-us",&m_textScenarioTitle);
+ hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,42.0f,L"en-us",&m_textScenarioTitle);
  if(FAILED(hr)){SetError("OrbitX Header scenario title format: "+HrText(hr));return false;}
  m_textLogo->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); m_textLogoX->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
  m_textMenu->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
