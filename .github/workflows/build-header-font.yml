@@ -7,7 +7,7 @@ on:
       - feature/ui-polish-01
     paths:
       - .github/workflows/build-header-font.yml
-      - tools/fonts/OrbitX_Header_Font_P8_Builder.py
+      - tools/fonts/OrbitX_Header_Font_P9_Builder.py
 
 jobs:
   build:
@@ -24,35 +24,45 @@ jobs:
           python -m pip install 'fonttools==4.59.2'
           sudo apt-get update -qq
           sudo apt-get install -y fonts-dejavu-core
-      - name: Check font builder sources
+      - name: Check builder sources
         run: |
           test -f tools/fonts/OrbitX_Header_Font_Builder.py
           test -f tools/fonts/OrbitX_Header_Font_P8_Builder.py
-      - name: Build OrbitX Header Font P8
-        run: python tools/fonts/OrbitX_Header_Font_P8_Builder.py
-      - name: Verify P8 TTF structure and curve outlines
+          test -f tools/fonts/OrbitX_Header_Font_P9_Builder.py
+      - name: Build OrbitX Header Font P9
+        run: python tools/fonts/OrbitX_Header_Font_P9_Builder.py
+      - name: Verify P9 TTF and unchanged P7/P8 spacing
         run: |
           python - <<'PY'
           from pathlib import Path
           from fontTools.ttLib import TTFont
-          p=Path('tools/fonts/OrbitX_Header_Font_Prototype_8.ttf')
-          assert p.is_file(), 'Expected P8 font file was not produced'
-          f=TTFont(p)
-          assert f['name'].getDebugName(1)=='OrbitX Header Font P8'
-          assert f['OS/2'].fsType==0
-          assert f['maxp'].numGlyphs>1000
-          cmap=f.getBestCmap()
-          assert all(ord(ch) in cmap for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
-          curve_count=lambda ch: sum((flag&1)==0 for flag in f['glyf'][cmap[ord(ch)]].flags)
-          assert curve_count('C')>=4 and curve_count('O')>=8 and curve_count('B')>=4
-          assert curve_count('M')==0 and curve_count('N')==0
-          f.close()
-          print('P8 font structure, character coverage, and rounded outlines verified.')
-          print('Microsoft Word rendering requires a Windows test.')
+          directory=Path('tools/fonts')
+          p8=directory/'OrbitX_Header_Font_Prototype_8.ttf'
+          p9=directory/'OrbitX_Header_Font_Prototype_9.ttf'
+          assert p8.is_file() and p9.is_file(), 'Font builder did not generate both files'
+          a,b=TTFont(p8),TTFont(p9)
+          assert b['name'].getDebugName(1)=='OrbitX Header Font P9'
+          assert b['OS/2'].fsType==0
+          assert b['maxp'].numGlyphs>1000
+          for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789':
+              assert ord(ch) in b.getBestCmap(), f'Missing {ch}'
+              left=a.getBestCmap()[ord(ch)]
+              right=b.getBestCmap()[ord(ch)]
+              assert a['hmtx'][left]==b['hmtx'][right], f'Spacing changed for {ch}'
+          for ch in 'AMNX':
+              left=a.getBestCmap()[ord(ch)]
+              right=b.getBestCmap()[ord(ch)]
+              assert list(a['glyf'][left].coordinates)==list(b['glyf'][right].coordinates), f'Angular glyph {ch} changed'
+          c0=a['glyf'][a.getBestCmap()[ord('C')]]
+          c1=b['glyf'][b.getBestCmap()[ord('C')]]
+          assert list(c0.coordinates)!=list(c1.coordinates), 'C corner radius did not change'
+          a.close();b.close()
+          print('P9 TTF valid. Curves enlarged; widths, bearings, and angular letters unchanged.')
+          print('Microsoft Word rendering still requires a Windows test.')
           PY
-      - name: Publish downloadable P8 TTF
+      - name: Publish downloadable P9 TTF
         uses: actions/upload-artifact@v4
         with:
-          name: OrbitX-Header-Font-P8-TTF
-          path: tools/fonts/OrbitX_Header_Font_Prototype_8.ttf
+          name: OrbitX-Header-Font-P9-TTF
+          path: tools/fonts/OrbitX_Header_Font_Prototype_9.ttf
           if-no-files-found: error
