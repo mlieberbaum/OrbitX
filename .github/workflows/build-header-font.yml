@@ -1,0 +1,47 @@
+name: Build OrbitX header font
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ui-polish-01
+    paths:
+      - .github/workflows/build-header-font.yml
+      - tools/fonts/OrbitX_Header_Font_Builder.py
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install font builder dependency
+        run: python -m pip install 'fonttools==4.59.2'
+      - name: Generate vector fonts
+        run: python tools/fonts/OrbitX_Header_Font_Builder.py
+      - name: Verify generated fonts
+        run: |
+          python - <<'PY'
+          from fontTools.ttLib import TTFont
+          from pathlib import Path
+          for ext in ('ttf', 'otf'):
+              path = Path('tools/fonts/OrbitX_Header_Font_Prototype_4.' + ext)
+              assert path.is_file(), f'Missing {path}'
+              font = TTFont(path)
+              cmap = font.getBestCmap()
+              assert all(ord(c) in cmap for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
+              font.close()
+              print('Verified', path)
+          PY
+      - name: Publish downloadable fonts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrbitX-Header-Font-Prototype-4
+          path: |
+            tools/fonts/OrbitX_Header_Font_Prototype_4.ttf
+            tools/fonts/OrbitX_Header_Font_Prototype_4.otf
+          if-no-files-found: error
