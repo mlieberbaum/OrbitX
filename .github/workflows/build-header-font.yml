@@ -6,7 +6,8 @@ on:
     branches:
       - feature/ui-polish-01
     paths:
-      - tools/fonts/OrbitX_Header_Font_P5_Builder.py
+      - .github/workflows/build-header-font.yml
+      - tools/fonts/OrbitX_Header_Font_P7_Builder.py
 
 jobs:
   build:
@@ -23,30 +24,30 @@ jobs:
           python -m pip install 'fonttools==4.59.2'
           sudo apt-get update -qq
           sudo apt-get install -y fonts-dejavu-core
-      - name: Check source files
+      - name: Check font builder sources
         run: |
           test -f tools/fonts/OrbitX_Header_Font_Builder.py
-          test -f tools/fonts/OrbitX_Header_Font_P5_Builder.py
-      - name: Build Word-compatibility prototype 5
-        run: python tools/fonts/OrbitX_Header_Font_P5_Builder.py
-      - name: Validate new font
+          test -f tools/fonts/OrbitX_Header_Font_P7_Builder.py
+      - name: Build OrbitX Header Font P7
+        run: python tools/fonts/OrbitX_Header_Font_P7_Builder.py
+      - name: Verify TTF structure and coverage
         run: |
           python - <<'PY'
-          from fontTools.ttLib import TTFont
           from pathlib import Path
-          p=Path('tools/fonts/OrbitX_Header_Font_Prototype_5.ttf')
+          from fontTools.ttLib import TTFont
+          p=Path('tools/fonts/OrbitX_Header_Font_Prototype_7.ttf')
           assert p.is_file()
           f=TTFont(p)
-          assert f['name'].getDebugName(1)=='OrbitX Header Font P5'
-          assert f['OS/2'].fsType == 0
-          assert all(ord(c) in f.getBestCmap() for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
-          assert f['maxp'].numGlyphs > 1000
+          assert f['name'].getDebugName(1)=='OrbitX Header Font P7'
+          assert f['OS/2'].fsType==0
+          assert f['maxp'].numGlyphs>1000
+          assert all(ord(ch) in f.getBestCmap() for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
           f.close()
-          print('Font structure and character coverage verified. Microsoft Word rendering requires a Windows test.')
+          print('P7 TTF verified. Word rendering still requires a Windows test.')
           PY
-      - name: Publish Windows font
+      - name: Publish downloadable TTF
         uses: actions/upload-artifact@v4
         with:
-          name: OrbitX-Header-Font-P5-TTF
-          path: tools/fonts/OrbitX_Header_Font_Prototype_5.ttf
+          name: OrbitX-Header-Font-P7-TTF
+          path: tools/fonts/OrbitX_Header_Font_Prototype_7.ttf
           if-no-files-found: error
