@@ -7,7 +7,7 @@ on:
       - feature/ui-polish-01
     paths:
       - .github/workflows/build-header-font.yml
-      - tools/fonts/OrbitX_Header_Font_P7_Builder.py
+      - tools/fonts/OrbitX_Header_Font_P8_Builder.py
 
 jobs:
   build:
@@ -27,27 +27,32 @@ jobs:
       - name: Check font builder sources
         run: |
           test -f tools/fonts/OrbitX_Header_Font_Builder.py
-          test -f tools/fonts/OrbitX_Header_Font_P7_Builder.py
-      - name: Build OrbitX Header Font P7
-        run: python tools/fonts/OrbitX_Header_Font_P7_Builder.py
-      - name: Verify TTF structure and coverage
+          test -f tools/fonts/OrbitX_Header_Font_P8_Builder.py
+      - name: Build OrbitX Header Font P8
+        run: python tools/fonts/OrbitX_Header_Font_P8_Builder.py
+      - name: Verify P8 TTF structure and curve outlines
         run: |
           python - <<'PY'
           from pathlib import Path
           from fontTools.ttLib import TTFont
-          p=Path('tools/fonts/OrbitX_Header_Font_Prototype_7.ttf')
-          assert p.is_file()
+          p=Path('tools/fonts/OrbitX_Header_Font_Prototype_8.ttf')
+          assert p.is_file(), 'Expected P8 font file was not produced'
           f=TTFont(p)
-          assert f['name'].getDebugName(1)=='OrbitX Header Font P7'
+          assert f['name'].getDebugName(1)=='OrbitX Header Font P8'
           assert f['OS/2'].fsType==0
           assert f['maxp'].numGlyphs>1000
-          assert all(ord(ch) in f.getBestCmap() for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
+          cmap=f.getBestCmap()
+          assert all(ord(ch) in cmap for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')
+          curve_count=lambda ch: sum((flag&1)==0 for flag in f['glyf'][cmap[ord(ch)]].flags)
+          assert curve_count('C')>=4 and curve_count('O')>=8 and curve_count('B')>=4
+          assert curve_count('M')==0 and curve_count('N')==0
           f.close()
-          print('P7 TTF verified. Word rendering still requires a Windows test.')
+          print('P8 font structure, character coverage, and rounded outlines verified.')
+          print('Microsoft Word rendering requires a Windows test.')
           PY
-      - name: Publish downloadable TTF
+      - name: Publish downloadable P8 TTF
         uses: actions/upload-artifact@v4
         with:
-          name: OrbitX-Header-Font-P7-TTF
-          path: tools/fonts/OrbitX_Header_Font_Prototype_7.ttf
+          name: OrbitX-Header-Font-P8-TTF
+          path: tools/fonts/OrbitX_Header_Font_Prototype_8.ttf
           if-no-files-found: error
