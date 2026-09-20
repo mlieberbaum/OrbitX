@@ -39,7 +39,7 @@ struct SubmenuLayout {
     // Submenus deliberately begin below the OrbitX wordmark.  Keep this geometry
     // canonical: rendering and hit-testing consume these exact rectangles.
     RectF back{};
-    RectF title{72,347,620,392};
+    RectF title{72,372,700,430};
     // Scenario browser: design-space rectangles shared by rendering and hit-testing.
     RectF solarSystem{52,445,800,519};
     RectF moonView{100,540,780,594};
