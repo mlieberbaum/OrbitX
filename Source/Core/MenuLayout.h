@@ -48,8 +48,8 @@ struct SubmenuLayout {
     RectF description{860,338,1392,950};
     RectF preview{892,422,1360,592};
     RectF launch{1440,865,1700,948};
-    RectF graphicsWindowed{72,477,286,542};
-    RectF graphicsFullscreen{304,477,550,542};
+    RectF graphicsWindowed{72,542,286,607};
+    RectF graphicsFullscreen{304,542,550,607};
 };
 
 inline float ScaleFor(float width,float height){return std::min(width/kDesignWidth,height/kDesignHeight);}
