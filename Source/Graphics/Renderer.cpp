@@ -173,7 +173,15 @@ bool Renderer::InitVectorText(){
  if(FAILED(hr)){SetError("OrbitX Header logo X format: "+HrText(hr));return false;}
  hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,24.0f,L"en-us",&m_textMenu);
  if(FAILED(hr)){SetError("OrbitX Header menu format: "+HrText(hr));return false;}
- m_textLogo->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); m_textLogoX->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); m_textMenu->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+ // Scenario list labels are smaller than main-menu labels; the submenu heading is larger.
+ hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,20.0f,L"en-us",&m_textScenarioButton);
+ if(FAILED(hr)){SetError("OrbitX Header scenario button format: "+HrText(hr));return false;}
+ hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,34.0f,L"en-us",&m_textScenarioTitle);
+ if(FAILED(hr)){SetError("OrbitX Header scenario title format: "+HrText(hr));return false;}
+ m_textLogo->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING); m_textLogoX->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+ m_textMenu->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+ m_textScenarioButton->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+ m_textScenarioTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 
  // OrbitX is Per-Monitor-V2 DPI aware, so the swap-chain dimensions are physical pixels.
  // Keep the HUD coordinate system at 96 DPI intentionally: 1 D2D DIP == 1 back-buffer pixel.
@@ -415,7 +423,7 @@ void Renderer::DrawHudText(){
      m_d2dContext->DrawBitmap(m_menuLogo.Get(),dst,1.0f,D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,nullptr);
    }
    // Main-menu and submenu BACK controls share the SCENARIOS button renderer.
-   auto drawMenuButton=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool hot,bool showHoverArrow=true){
+   auto drawMenuButton=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool hot,bool showHoverArrow=true,IDWriteTextFormat* labelFormat=nullptr){
        auto outer=makeButton(r,0.0f), mid=makeButton(r,2.0f), inner=makeButton(r,5.0f);
        ID2D1Brush* fillBrush = (hot && hotGradient.Get()!=nullptr) ? static_cast<ID2D1Brush*>(hotGradient.Get()) : (glassGradient.Get()!=nullptr ? static_cast<ID2D1Brush*>(glassGradient.Get()) : static_cast<ID2D1Brush*>(glass.Get()));
        if(glassGradient.Get()!=nullptr){ glassGradient->SetStartPoint(D2D1::Point2F(0,r.top)); glassGradient->SetEndPoint(D2D1::Point2F(0,r.bottom)); }
@@ -433,7 +441,8 @@ void Renderer::DrawHudText(){
        }
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+8,r.top+5),D2D1::Point2F(r.right-34,r.top+5),hot?green.Get():glassHighlight.Get(),hot?1.6f:0.8f);
        m_d2dContext->DrawLine(D2D1::Point2F(r.left+2,r.top+9),D2D1::Point2F(r.left+2,r.bottom-9),hot?green.Get():muted.Get(),hot?4.0f:1.4f);
-       centeredButtonText(label,r,r.left+(mainLayout.textX-mainLayout.buttons[0].left),m_textMenu.Get(),white.Get(),3.4f);
+       centeredButtonText(label,r,r.left+(mainLayout.textX-mainLayout.buttons[0].left),
+           labelFormat?labelFormat:m_textMenu.Get(),white.Get(),labelFormat?2.5f:3.4f);
        if(hot&&showHoverArrow)centeredButtonText(L">>",r,r.right-62,m_textMenu.Get(),green.Get(),0.0f);
    };
    if(m_appState==AppState::MainMenu){
@@ -450,32 +459,47 @@ void Renderer::DrawHudText(){
      centeredButtonText(L"<<",subLayout.back,subLayout.back.left+18,m_textMenu.Get(),green.Get(),0.0f);
      const wchar_t* title=L"";
      if(m_appState==AppState::ScenarioSelect)title=L"SCENARIOS"; else if(m_appState==AppState::Parameters)title=L"PARAMETERS"; else if(m_appState==AppState::VisualEffects)title=L"VISUAL EFFECTS"; else if(m_appState==AppState::Modules)title=L"MODULES"; else if(m_appState==AppState::Graphics)title=L"GRAPHICS"; else if(m_appState==AppState::Joystick)title=L"HARDWARE"; else if(m_appState==AppState::Extra)title=L"EXTRA";
-     tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
+     if(m_appState==AppState::ScenarioSelect){
+       // Underline only the SCENARIOS heading, retaining the existing header font.
+       Microsoft::WRL::ComPtr<IDWriteTextLayout> heading;
+       const UINT32 titleLength=(UINT32)wcslen(title);
+       if(SUCCEEDED(m_dwriteFactory->CreateTextLayout(title,titleLength,m_textScenarioTitle.Get(),1000.0f,120.0f,&heading))){
+         const DWRITE_TEXT_RANGE headingRange{0,titleLength};
+         heading->SetUnderline(TRUE,headingRange);
+         Microsoft::WRL::ComPtr<IDWriteTextLayout1> headingSpacing;
+         if(SUCCEEDED(heading.As(&headingSpacing)))headingSpacing->SetCharacterSpacing(0.0f,3.0f,0.0f,headingRange);
+         m_d2dContext->DrawTextLayout(D2D1::Point2F(subLayout.title.left,subLayout.title.top),
+                                       heading.Get(),white.Get(),D2D1_DRAW_TEXT_OPTIONS_NONE);
+       }
+     }else{
+       tracked(title,subLayout.title.left,subLayout.title.top,m_textMenu.Get(),white.Get(),3.0f);
+     }
      if(m_appState==AppState::ScenarioSelect){
        // Expandable category and nested selectable scenario; no decorative planet icons.
        drawMenuButton(subLayout.solarSystem,L"SOLAR SYSTEM",m_scenarioHover==0,false);
        centeredButtonText(m_solarSystemExpanded?L"v":L">",subLayout.solarSystem,subLayout.solarSystem.right-47,m_textMenu.Get(),green.Get(),0.0f);
        if(m_solarSystemExpanded){
          // Indented glass panel uses the exact same illuminated hover style as the main menu.
-         drawMenuButton(subLayout.moonView,L"MOON VIEW",m_scenarioHover==1||m_scenarioSelected);
+         drawMenuButton(subLayout.moonView,L"MOON VIEW",m_scenarioHover==1||m_scenarioSelected,true,m_textScenarioButton.Get());
          m_d2dContext->DrawLine(D2D1::Point2F(72,subLayout.solarSystem.bottom+6),
-             D2D1::Point2F(72,subLayout.moonView.bottom-28),muted.Get(),1.2f);
-         m_d2dContext->DrawLine(D2D1::Point2F(72,subLayout.moonView.top+32),
-             D2D1::Point2F(subLayout.moonView.left-4,subLayout.moonView.top+32),muted.Get(),1.2f);
+             D2D1::Point2F(72,(subLayout.moonView.top+subLayout.moonView.bottom)*0.5f),muted.Get(),1.2f);
+         m_d2dContext->DrawLine(D2D1::Point2F(72,(subLayout.moonView.top+subLayout.moonView.bottom)*0.5f),
+             D2D1::Point2F(subLayout.moonView.left-4,(subLayout.moonView.top+subLayout.moonView.bottom)*0.5f),muted.Get(),1.2f);
          // Disabled future scenarios match the concept art, without showing planet icons
          // or registering click targets until their actual scenarios exist.
          auto futureScenario=[&](const OrbitX::UI::RectF& r,const wchar_t* name){
            auto g=makeButton(r,0.0f);
            m_d2dContext->FillGeometry(g.Get(),glass.Get());
            m_d2dContext->DrawGeometry(g.Get(),muted.Get(),0.9f);
-           centeredButtonText(name,r,r.left+(mainLayout.textX-mainLayout.buttons[0].left),m_textMenu.Get(),muted.Get(),2.2f);
-           m_d2dContext->DrawLine(D2D1::Point2F(72,r.top+31),
-               D2D1::Point2F(r.left-4,r.top+31),muted.Get(),0.9f);
+           centeredButtonText(name,r,r.left+(mainLayout.textX-mainLayout.buttons[0].left),m_textScenarioButton.Get(),muted.Get(),2.2f);
+           const float midY=(r.top+r.bottom)*0.5f;
+           m_d2dContext->DrawLine(D2D1::Point2F(72,midY),
+               D2D1::Point2F(r.left-4,midY),muted.Get(),0.9f);
          };
          futureScenario(subLayout.earthView,L"EARTH VIEW");
          futureScenario(subLayout.marsView,L"MARS VIEW");
-         m_d2dContext->DrawLine(D2D1::Point2F(72,subLayout.moonView.bottom-28),
-             D2D1::Point2F(72,subLayout.marsView.top+31),muted.Get(),0.9f);
+         m_d2dContext->DrawLine(D2D1::Point2F(72,(subLayout.moonView.top+subLayout.moonView.bottom)*0.5f),
+             D2D1::Point2F(72,(subLayout.marsView.top+subLayout.marsView.bottom)*0.5f),muted.Get(),0.9f);
        }
        if(m_solarSystemExpanded&&m_scenarioSelected){
          // Floating dark-smoked-glass information panel with green glass edging.

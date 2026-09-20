@@ -62,7 +62,7 @@ private:
     Microsoft::WRL::ComPtr<IDWriteFactory> m_dwriteFactory;
     // Private app-only collection: does not install or register fonts in Windows.
     Microsoft::WRL::ComPtr<IDWriteFontCollection1> m_headerFontCollection;
-    Microsoft::WRL::ComPtr<IDWriteTextFormat> m_textLeft,m_textRight,m_textLogo,m_textLogoX,m_textMenu;
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> m_textLeft,m_textRight,m_textLogo,m_textLogoX,m_textMenu,m_textScenarioButton,m_textScenarioTitle;
     Microsoft::WRL::ComPtr<IDWriteRenderingParams> m_textRenderingParams;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_textBrush;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_menuBackground;
