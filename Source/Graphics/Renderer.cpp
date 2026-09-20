@@ -165,7 +165,7 @@ bool Renderer::InitVectorText(){
  if(FAILED(hr))return false;
  m_textLeft->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);m_textLeft->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
  m_textRight->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);m_textRight->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
- // The P11 OrbitX Header font is loaded from Runtime/Fonts via a private app-only
+ // OrbitX Header is loaded from Runtime/Fonts via a private app-only
  // collection. Do not use the system collection here: Windows font installation is optional.
  hr=m_dwriteFactory->CreateTextFormat(L"OrbitX Header",m_headerFontCollection.Get(),DWRITE_FONT_WEIGHT_NORMAL,DWRITE_FONT_STYLE_NORMAL,DWRITE_FONT_STRETCH_NORMAL,88.0f,L"en-us",&m_textLogo);
  if(FAILED(hr)){SetError("OrbitX Header logo format: "+HrText(hr));return false;}
