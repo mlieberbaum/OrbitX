@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <fstream>
 #include <string>
+#include <vector>
 #include "../Graphics/Renderer.h"
 using OrbitX::Graphics::Renderer;
 static Renderer* g_renderer=nullptr;
@@ -77,4 +78,20 @@ CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::wstring runtime=std::filesyste
 Renderer renderer;g_renderer=&renderer;if(!renderer.Initialize(h,clientW,clientH,runtime)){MessageBoxA(h,renderer.LastError().c_str(),"OrbitX initialization failed",MB_OK|MB_ICONERROR);DestroyWindow(h);g_renderer=nullptr;CoUninitialize();return 2;}
 // Display preference: default to fullscreen on first run; persist the user's choice thereafter.
 bool wantFullscreen=true;{std::ifstream f(std::filesystem::path(runtime)/L"Config"/L"OrbitX.cfg");std::string line;while(std::getline(f,line)){if(line=="DisplayMode=Windowed")wantFullscreen=false;else if(line=="DisplayMode=Fullscreen")wantFullscreen=true;}}
-renderer.SetFullscreen(wantFullscreen);auto last=std::chrono::steady_clock::now();MSG msg{};while(msg.message!=WM_QUIT){if(PeekMessage(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessage(&msg);}else{auto now=std::chrono::steady_clock::now();float dt=std::chrono::duration<float>(now-last).count();last=now;renderer.Update(dt);renderer.Render();}}{std::filesystem::create_directories(std::filesystem::path(runtime)/L"Config");std::ofstream f(std::filesystem::path(runtime)/L"Config"/L"OrbitX.cfg",std::ios::trunc);if(f)f<<"DisplayMode="<<(renderer.IsFullscreen()?"Fullscreen":"Windowed")<<"\n";}renderer.Shutdown();g_renderer=nullptr;CoUninitialize();return 0;}
+renderer.SetFullscreen(wantFullscreen);auto last=std::chrono::steady_clock::now();MSG msg{};while(msg.message!=WM_QUIT){if(PeekMessage(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessage(&msg);}else{auto now=std::chrono::steady_clock::now();float dt=std::chrono::duration<float>(now-last).count();last=now;renderer.Update(dt);renderer.Render();}}{std::filesystem::create_directories(std::filesystem::path(runtime)/L"Config");
+ const auto configPath=std::filesystem::path(runtime)/L"Config"/L"OrbitX.cfg";
+ // Preserve TextureRoot and all other configuration entries when saving display mode.
+ std::vector<std::string> configLines;std::ifstream input(configPath);std::string line;bool foundDisplayMode=false;
+ while(std::getline(input,line)){
+   if(line.rfind("DisplayMode=",0)==0){
+     if(foundDisplayMode)continue;
+     line=std::string("DisplayMode=")+(renderer.IsFullscreen()?"Fullscreen":"Windowed");
+     foundDisplayMode=true;
+   }
+   configLines.push_back(line);
+ }
+ if(!foundDisplayMode)configLines.push_back(std::string("DisplayMode=")+(renderer.IsFullscreen()?"Fullscreen":"Windowed"));
+ input.close();
+ std::ofstream output(configPath,std::ios::trunc);
+ for(const auto& entry:configLines)output<<entry<<"\n";
+}renderer.Shutdown();g_renderer=nullptr;CoUninitialize();return 0;}
