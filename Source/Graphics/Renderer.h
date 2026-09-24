@@ -42,7 +42,7 @@ private:
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);
 
-    HWND m_hwnd{}; UINT m_width{},m_height{}; std::wstring m_root; std::string m_error;
+    HWND m_hwnd{}; UINT m_width{},m_height{}; std::wstring m_root, m_textureRoot; std::string m_error;
     Microsoft::WRL::ComPtr<IDXGIFactory6> m_factory; Microsoft::WRL::ComPtr<ID3D12Device> m_device;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_queue; Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtvHeap,m_srvHeap,m_dsvHeap;
