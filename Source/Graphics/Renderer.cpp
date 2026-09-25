@@ -30,7 +30,9 @@ void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\
 bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hwnd=hwnd;m_width=w;m_height=h;m_root=root;
  std::filesystem::path textureRoot;std::string textureError;
  if(!OrbitX::Core::LoadTextureRoot(std::filesystem::path(m_root),textureRoot,textureError)){SetError(textureError);return false;}
- m_textureRoot=textureRoot.wstring();
+ std::filesystem::path moonTexture; 
+ if(!OrbitX::Core::LoadMoonTexturePath(std::filesystem::path(m_root),textureRoot,moonTexture,textureError)){SetError(textureError);return false;}
+ m_moonTexturePath=moonTexture.wstring();
 #if defined(_DEBUG)
  ComPtr<ID3D12Debug> dbg; if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer();
 #endif
@@ -67,7 +69,7 @@ bool Renderer::LoadTextureWIC(const std::wstring&path){
  ComPtr<IWICImagingFactory>f;HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
  if(FAILED(hr)){SetError("WIC factory failed");return false;}
  ComPtr<IWICBitmapDecoder>d;hr=f->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d);
- if(FAILED(hr)){SetError("Cannot open external Moon texture: "+std::filesystem::path(path).string()+". Check TextureRoot and Moon/Moon.jpg.");return false;}
+ if(FAILED(hr)){SetError("Cannot open external Moon texture: "+std::filesystem::path(path).string()+". Check TextureRoot in OrbitX.cfg and Texture in Bodies/Moon.cfg.");return false;}
  ComPtr<IWICBitmapFrameDecode>fr;d->GetFrame(0,&fr);UINT sw,sh;fr->GetSize(&sw,&sh);
  UINT tw=sw,th=sh;const UINT maxW=8192;ComPtr<IWICBitmapSource>src=fr;
  if(sw>maxW){tw=maxW;th=(UINT)((uint64_t)sh*tw/sw);ComPtr<IWICBitmapScaler>sc;f->CreateBitmapScaler(&sc);sc->Initialize(fr.Get(),tw,th,WICBitmapInterpolationModeFant);src=sc;}
@@ -228,7 +230,7 @@ bool Renderer::CreateHudBackBufferTargets(){
  return true;
 }
 
-bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateSphere()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC((std::filesystem::path(m_textureRoot)/L"Moon"/L"Moon.jpg").wstring()))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
+bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateSphere()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC(m_moonTexturePath))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
 
 bool Renderer::LoadMenuBackground(){
  ComPtr<IWICImagingFactory> f; HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
@@ -268,7 +270,7 @@ bool Renderer::LoadScenarioPreview(){
  m_scenarioPreviewArtwork=SUCCEEDED(f->CreateDecoderFromFilename(
      artwork.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d));
  if(!m_scenarioPreviewArtwork){
-   const auto map=(std::filesystem::path(m_textureRoot)/L"Moon"/L"Moon.jpg").wstring();
+   const auto& map=m_moonTexturePath;
    if(FAILED(f->CreateDecoderFromFilename(map.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d)))return false;
  }
  ComPtr<IWICBitmapFrameDecode> fr;
