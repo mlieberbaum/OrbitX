@@ -9,6 +9,7 @@
 #include <d2d1_3.h>
 #include <dwrite.h>
 #include <dwrite_1.h>
+#include <dwrite_3.h>
 #include <DirectXMath.h>
 #include <vector>
 #include <string>
@@ -37,11 +38,11 @@ private:
     struct Vertex { DirectX::XMFLOAT3 pos, normal; DirectX::XMFLOAT2 uv; };
     struct SceneCB { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 model; DirectX::XMFLOAT4 sunDir; };
     bool InitDevice(); bool InitAssets(); bool CreateSphere(); bool LoadTextureWIC(const std::wstring& path);
-    bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo();
+    bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool LoadBundledHeaderFont(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo(); bool LoadScenarioPreview();
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);
 
-    HWND m_hwnd{}; UINT m_width{},m_height{}; std::wstring m_root; std::string m_error;
+    HWND m_hwnd{}; UINT m_width{},m_height{}; std::wstring m_root, m_moonTexturePath; std::string m_error;
     Microsoft::WRL::ComPtr<IDXGIFactory6> m_factory; Microsoft::WRL::ComPtr<ID3D12Device> m_device;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_queue; Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtvHeap,m_srvHeap,m_dsvHeap;
@@ -59,20 +60,28 @@ private:
     Microsoft::WRL::ComPtr<ID2D1Device2> m_d2dDevice;
     Microsoft::WRL::ComPtr<ID2D1DeviceContext2> m_d2dContext;
     Microsoft::WRL::ComPtr<IDWriteFactory> m_dwriteFactory;
-    Microsoft::WRL::ComPtr<IDWriteTextFormat> m_textLeft,m_textRight,m_textLogo,m_textLogoX,m_textMenu;
+    // Private app-only collection: does not install or register fonts in Windows.
+    Microsoft::WRL::ComPtr<IDWriteFontCollection1> m_headerFontCollection;
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> m_textLeft,m_textRight,m_textLogo,m_textLogoX,m_textMenu,m_textScenarioButton,m_textScenarioTitle;
     Microsoft::WRL::ComPtr<IDWriteRenderingParams> m_textRenderingParams;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_textBrush;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_menuBackground;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_menuLogo;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_scenarioPreview;
+    bool m_scenarioPreviewArtwork=false;
     Microsoft::WRL::ComPtr<ID3D11Resource> m_wrappedBack[FrameCount];
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> m_d2dTarget[FrameCount];
 
     OrbitX::Core::SimulationState m_state;
     float m_yaw=0.35f,m_pitch=0.18f,m_distanceKm=5200.0f,m_fov=40.0f;
-    enum class AppState { MainMenu, ScenarioSelect, Parameters, VisualEffects, Modules, Graphics, Joystick, Extra, About, Simulation };
+    enum class AppState { MainMenu, ScenarioSelect, Parameters, VisualEffects, Modules, Graphics, Joystick, Extra, Simulation };
     AppState m_appState=AppState::MainMenu;
     int m_menuSelection=0;
     int m_hoverSelection=-1;
+    bool m_solarSystemExpanded=false;
+    bool m_scenarioSelected=false;
+    int m_scenarioHover=-1; // 0: category, 1: Moon View, 2: Launch
+    int m_graphicsHover=-1; // 0: WINDOWED, 1: FULL SCREEN, -1: neither
     bool m_mouseNavigation=false;
     bool m_fullscreen=false; WINDOWPLACEMENT m_windowedPlacement{sizeof(WINDOWPLACEMENT)}; DWORD m_windowedStyle=WS_OVERLAPPEDWINDOW;
     bool m_drag=false; POINT m_dragAnchorScreen{};

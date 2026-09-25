@@ -6,7 +6,7 @@ namespace OrbitX::UI {
 
 constexpr float kDesignWidth  = 1920.0f;
 constexpr float kDesignHeight = 1080.0f;
-constexpr int   kMainMenuCount = 9;
+constexpr int   kMainMenuCount = 8;
 
 struct RectF {
     float left{}, top{}, right{}, bottom{};
@@ -38,11 +38,18 @@ struct SubmenuLayout {
     float panelRight=690.0f;
     // Submenus deliberately begin below the OrbitX wordmark.  Keep this geometry
     // canonical: rendering and hit-testing consume these exact rectangles.
-    RectF back{58,215,230,270};
-    RectF title{72,305,620,350};
-    RectF moonView{72,390,560,465};
-    RectF graphicsWindowed{72,435,286,500};
-    RectF graphicsFullscreen{304,435,550,500};
+    RectF back{};
+    RectF title{72,372,700,430};
+    // Scenario browser: design-space rectangles shared by rendering and hit-testing.
+    RectF solarSystem{52,445,800,519};
+    RectF moonView{100,540,780,594};
+    RectF earthView{100,605,780,659}; // Future scenario: visible but disabled.
+    RectF marsView{100,670,780,724};  // Future scenario: visible but disabled.
+    RectF description{860,338,1392,950};
+    RectF preview{892,422,1360,592};
+    RectF launch{1440,865,1800,948};
+    RectF graphicsWindowed{72,542,286,607};
+    RectF graphicsFullscreen{304,542,550,607};
 };
 
 inline float ScaleFor(float width,float height){return std::min(width/kDesignWidth,height/kDesignHeight);}
@@ -57,7 +64,10 @@ inline MainMenuLayout BuildMainMenuLayout(float width,float height){
     return out;
 }
 inline SubmenuLayout BuildSubmenuLayout(float width,float height){
-    SubmenuLayout out{}; out.scale=ScaleFor(width,height);out.offsetX=OffsetXFor(width,out.scale);out.offsetY=OffsetYFor(height,out.scale);return out;
+    SubmenuLayout out{}; out.scale=ScaleFor(width,height);out.offsetX=OffsetXFor(width,out.scale);out.offsetY=OffsetYFor(height,out.scale);
+    // Keep every submenu BACK control identical in position and size to SCENARIOS.
+    out.back=BuildMainMenuLayout(width,height).buttons[0];
+    return out;
 }
 inline void ScreenToDesign(float sx,float sy,float scale,float ox,float oy,float& x,float& y){x=(sx-ox)/scale;y=(sy-oy)/scale;}
 inline bool PointInButton(const RectF& r,float cut,float x,float y){

@@ -7,10 +7,43 @@
 #include <algorithm>
 #include <fstream>
 #include <string>
+#include <vector>
 #include "../Graphics/Renderer.h"
 using OrbitX::Graphics::Renderer;
 static Renderer* g_renderer=nullptr;
 static constexpr double kAspect=16.0/9.0;
+
+    
+// User preferences are separate from tracked installation configuration.
+// Preserve other entries when adding future preferences (such as resolution).
+static void SaveUserDisplayMode(const std::filesystem::path& path,bool fullscreen){
+    std::vector<std::string> lines;std::ifstream input(path);std::string line;bool found=false;
+    const std::string value=std::string("DisplayMode=")+(fullscreen?"Fullscreen":"Windowed");
+    while(std::getline(input,line)){
+        if(line.rfind("DisplayMode=",0)==0){
+            if(found)continue;
+            line=value;found=true;
+        }
+        lines.push_back(line);
+    }
+    if(!found)lines.push_back(value);
+    input.close();
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream output(path,std::ios::trunc);
+    for(const auto& entry:lines)output<<entry<<"\n";
+}
+static bool LoadUserDisplayMode(const std::filesystem::path& path){
+    if(!std::filesystem::exists(path)){
+        SaveUserDisplayMode(path,true); // First startup: create local, untracked defaults.
+        return true;
+    }
+    bool fullscreen=true;std::ifstream input(path);std::string line;
+    while(std::getline(input,line)){
+        if(line=="DisplayMode=Windowed")fullscreen=false;
+        else if(line=="DisplayMode=Fullscreen")fullscreen=true;
+    }
+    return fullscreen;
+}
 
 static void FrameExtentsForDpi(HWND h,UINT dpi,int& extraW,int& extraH){
     RECT r{0,0,1600,900};
@@ -73,8 +106,7 @@ case WM_KILLFOCUS:if(g_renderer)g_renderer->OnMouseUp();return 0;
 case WM_CLOSE:DestroyWindow(h);return 0;case WM_DESTROY:PostQuitMessage(0);return 0;}return DefWindowProc(h,m,w,l);}
 int WINAPI wWinMain(HINSTANCE hi,HINSTANCE,LPWSTR,int){
 SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::wstring runtime=std::filesystem::current_path().wstring();std::filesystem::create_directories(runtime+L"\\Logs");WNDCLASSEX wc{sizeof(wc),CS_HREDRAW|CS_VREDRAW,WndProc,0,0,hi,LoadIcon(nullptr,IDI_APPLICATION),LoadCursor(nullptr,IDC_ARROW),(HBRUSH)GetStockObject(BLACK_BRUSH),nullptr,L"OrbitXWindow",nullptr};RegisterClassEx(&wc);RECT r{0,0,1920,1080};AdjustWindowRectExForDpi(&r,WS_OVERLAPPEDWINDOW,FALSE,0,GetDpiForSystem());HWND h=CreateWindowEx(0,wc.lpszClassName,L"OrbitX 0.25",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,r.right-r.left,r.bottom-r.top,nullptr,nullptr,hi,nullptr);if(!h){CoUninitialize();return 1;}ShowWindow(h,SW_SHOW);UpdateWindow(h);RECT client{};GetClientRect(h,&client);UINT clientW=(UINT)(client.right-client.left),clientH=(UINT)(client.bottom-client.top);
+CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::wstring runtime=std::filesystem::current_path().wstring();std::filesystem::create_directories(runtime+L"\\Logs");const auto userPrefsPath=std::filesystem::path(runtime)/L"Config"/L"UserPreferences.cfg";const bool wantFullscreen=LoadUserDisplayMode(userPrefsPath);WNDCLASSEX wc{sizeof(wc),CS_HREDRAW|CS_VREDRAW,WndProc,0,0,hi,LoadIcon(nullptr,IDI_APPLICATION),LoadCursor(nullptr,IDC_ARROW),(HBRUSH)GetStockObject(BLACK_BRUSH),nullptr,L"OrbitXWindow",nullptr};RegisterClassEx(&wc);RECT r{0,0,1920,1080};AdjustWindowRectExForDpi(&r,WS_OVERLAPPEDWINDOW,FALSE,0,GetDpiForSystem());HWND h=CreateWindowEx(0,wc.lpszClassName,L"OrbitX 0.25",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,r.right-r.left,r.bottom-r.top,nullptr,nullptr,hi,nullptr);if(!h){CoUninitialize();return 1;}ShowWindow(h,SW_SHOW);UpdateWindow(h);RECT client{};GetClientRect(h,&client);UINT clientW=(UINT)(client.right-client.left),clientH=(UINT)(client.bottom-client.top);
 Renderer renderer;g_renderer=&renderer;if(!renderer.Initialize(h,clientW,clientH,runtime)){MessageBoxA(h,renderer.LastError().c_str(),"OrbitX initialization failed",MB_OK|MB_ICONERROR);DestroyWindow(h);g_renderer=nullptr;CoUninitialize();return 2;}
-// Display preference: default to fullscreen on first run; persist the user's choice thereafter.
-bool wantFullscreen=true;{std::ifstream f(std::filesystem::path(runtime)/L"Config"/L"OrbitX.cfg");std::string line;while(std::getline(f,line)){if(line=="DisplayMode=Windowed")wantFullscreen=false;else if(line=="DisplayMode=Fullscreen")wantFullscreen=true;}}
-renderer.SetFullscreen(wantFullscreen);auto last=std::chrono::steady_clock::now();MSG msg{};while(msg.message!=WM_QUIT){if(PeekMessage(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessage(&msg);}else{auto now=std::chrono::steady_clock::now();float dt=std::chrono::duration<float>(now-last).count();last=now;renderer.Update(dt);renderer.Render();}}{std::filesystem::create_directories(std::filesystem::path(runtime)/L"Config");std::ofstream f(std::filesystem::path(runtime)/L"Config"/L"OrbitX.cfg",std::ios::trunc);if(f)f<<"DisplayMode="<<(renderer.IsFullscreen()?"Fullscreen":"Windowed")<<"\n";}renderer.Shutdown();g_renderer=nullptr;CoUninitialize();return 0;}
+// Display preference comes from auto-created, untracked UserPreferences.cfg.
+renderer.SetFullscreen(wantFullscreen);auto last=std::chrono::steady_clock::now();MSG msg{};while(msg.message!=WM_QUIT){if(PeekMessage(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessage(&msg);}else{auto now=std::chrono::steady_clock::now();float dt=std::chrono::duration<float>(now-last).count();last=now;renderer.Update(dt);renderer.Render();}}SaveUserDisplayMode(userPrefsPath,renderer.IsFullscreen());renderer.Shutdown();g_renderer=nullptr;CoUninitialize();return 0;}
