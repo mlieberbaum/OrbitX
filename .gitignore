@@ -2,3 +2,6 @@ Source/.vs/*/**
 Source/Build/*/**
 # Planetary imagery lives in the external TextureRoot, not in Git/Runtime.
 Runtime/Textures/Moon/
+
+# Machine-local preferences, automatically generated at first startup.
+Runtime/Config/UserPreferences.cfg
