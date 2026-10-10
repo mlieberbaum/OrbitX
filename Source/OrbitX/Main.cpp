@@ -95,7 +95,7 @@ case WM_SIZE:
         g_renderer->Render();
     }
     return 0;
-case WM_KEYDOWN:if(g_renderer)g_renderer->OnKeyDown(w);return 0;
+case WM_KEYDOWN:if(g_renderer && (!(l & (1LL<<30)) || !(GetKeyState(VK_CONTROL)&0x8000)))g_renderer->OnKeyDown(w);return 0;
 case WM_LBUTTONDOWN:if(g_renderer)g_renderer->OnLeftClick(GET_X_LPARAM(l),GET_Y_LPARAM(l));return 0;
 case WM_RBUTTONDOWN:if(g_renderer)g_renderer->OnMouseDown(GET_X_LPARAM(l),GET_Y_LPARAM(l));return 0;
 case WM_RBUTTONUP:if(g_renderer)g_renderer->OnMouseUp();return 0;

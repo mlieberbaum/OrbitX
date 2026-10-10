@@ -9,3 +9,6 @@ Runtime/Textures/Moon/
 
 # Machine-local preferences, automatically generated at first startup.
 Runtime/Config/UserPreferences.cfg
+
+# Also protect planetary data if TextureRoot is moved inside the checkout.
+/Textures/

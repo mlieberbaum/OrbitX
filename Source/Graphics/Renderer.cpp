@@ -33,6 +33,9 @@ bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hw
  std::filesystem::path moonTexture; 
  if(!OrbitX::Core::LoadMoonTexturePath(std::filesystem::path(m_root),textureRoot,moonTexture,textureError)){SetError(textureError);return false;}
  m_moonTexturePath=moonTexture.wstring();
+ try { m_planet.Scan(textureRoot / L"Moon" / L"Surf"); }
+ catch(const std::exception& e) { SetError(std::string("Cannot index Moon/Surf: ")+e.what());return false; }
+ if(m_planet.files.empty()) m_tileStatus=L"No DDS tiles: using configured global texture";
 #if defined(_DEBUG)
  ComPtr<ID3D12Debug> dbg; if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer();
 #endif
@@ -46,7 +49,8 @@ bool Renderer::InitDevice(){ HRESULT hr=CreateDXGIFactory2(0,IID_PPV_ARGS(&m_fac
  ComPtr<IDXGISwapChain1>s1; if(FAILED(m_factory->CreateSwapChainForHwnd(m_queue.Get(),m_hwnd,&sd,nullptr,nullptr,&s1)))return false;s1.As(&m_swap);m_factory->MakeWindowAssociation(m_hwnd,DXGI_MWA_NO_ALT_ENTER);m_frame=m_swap->GetCurrentBackBufferIndex();
  D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.NumDescriptors=FrameCount;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_rtvHeap));m_rtvStride=m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
  auto r=m_rtvHeap->GetCPUDescriptorHandleForHeapStart();for(UINT i=0;i<FrameCount;i++){m_swap->GetBuffer(i,IID_PPV_ARGS(&m_back[i]));m_device->CreateRenderTargetView(m_back[i].Get(),nullptr,r);r.ptr+=m_rtvStride;m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&m_alloc[i]));}
- hd={};hd.NumDescriptors=1;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_srvHeap));
+ hd={};hd.NumDescriptors=TileCapacity+1;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_srvHeap));
+ m_srvStride=m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
  hd={};hd.NumDescriptors=1;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_dsvHeap));
  m_device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,m_alloc[m_frame].Get(),nullptr,IID_PPV_ARGS(&m_cmd));m_cmd->Close();m_device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&m_fence));m_fenceEvent=CreateEvent(nullptr,FALSE,FALSE,nullptr);return m_fenceEvent!=nullptr; }
 
@@ -54,16 +58,20 @@ static bool Compile(const std::wstring&p,const char*entry,const char*target,ComP
 #if defined(_DEBUG)
  f|=D3DCOMPILE_DEBUG|D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
- HRESULT hr=D3DCompileFromFile(p.c_str(),nullptr,D3D_COMPILE_STANDARD_FILE_INCLUDE,entry,target,f,0,&out,&e);if(FAILED(hr)){err=e?(char*)e->GetBufferPointer():HrText(hr);return false;}return true;}
+ const D3D_SHADER_MACRO macros[]={
+#ifdef PLANET_DEBUG_MODE
+ {"PLANET_DEBUG_MODE","1"},
+#endif
+ {nullptr,nullptr}};
+ HRESULT hr=D3DCompileFromFile(p.c_str(),macros,D3D_COMPILE_STANDARD_FILE_INCLUDE,entry,target,f,0,&out,&e);if(FAILED(hr)){err=e?(char*)e->GetBufferPointer():HrText(hr);return false;}return true;}
 
 bool Renderer::CreateScenePipeline(){ComPtr<ID3DBlob>vs,ps,rs;std::string e;auto p=m_root+L"\\Shaders\\Moon.hlsl";if(!Compile(p,"VSMain","vs_5_1",vs,e)||!Compile(p,"PSMain","ps_5_1",ps,e)){SetError(e);return false;}
- D3D12_DESCRIPTOR_RANGE range{};range.RangeType=D3D12_DESCRIPTOR_RANGE_TYPE_SRV;range.NumDescriptors=1;range.BaseShaderRegister=0;D3D12_ROOT_PARAMETER rp[2]{};rp[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;rp[0].Descriptor.ShaderRegister=0;rp[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;rp[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;rp[1].DescriptorTable.NumDescriptorRanges=1;rp[1].DescriptorTable.pDescriptorRanges=&range;rp[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
- D3D12_STATIC_SAMPLER_DESC samp{};samp.Filter=D3D12_FILTER_ANISOTROPIC;samp.MaxAnisotropy=16;samp.AddressU=D3D12_TEXTURE_ADDRESS_MODE_WRAP;samp.AddressV=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.MaxLOD=D3D12_FLOAT32_MAX;samp.ShaderRegister=0;samp.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
- D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=2;rd.pParameters=rp;rd.NumStaticSamplers=1;rd.pStaticSamplers=&samp;rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;ComPtr<ID3DBlob>re;D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&rs,&re);m_device->CreateRootSignature(0,rs->GetBufferPointer(),rs->GetBufferSize(),IID_PPV_ARGS(&m_sceneRoot));
+ D3D12_DESCRIPTOR_RANGE range{};range.RangeType=D3D12_DESCRIPTOR_RANGE_TYPE_SRV;range.NumDescriptors=1;range.BaseShaderRegister=0;D3D12_ROOT_PARAMETER rp[3]{};rp[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;rp[0].Descriptor.ShaderRegister=0;rp[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;rp[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;rp[1].DescriptorTable.NumDescriptorRanges=1;rp[1].DescriptorTable.pDescriptorRanges=&range;rp[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+ rp[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;rp[2].Constants.ShaderRegister=1;rp[2].Constants.Num32BitValues=12;rp[2].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
+ D3D12_STATIC_SAMPLER_DESC samp{};samp.Filter=D3D12_FILTER_ANISOTROPIC;samp.MaxAnisotropy=16;samp.AddressU=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.AddressV=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.MaxLOD=D3D12_FLOAT32_MAX;samp.ShaderRegister=0;samp.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+ D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=3;rd.pParameters=rp;rd.NumStaticSamplers=1;rd.pStaticSamplers=&samp;rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;ComPtr<ID3DBlob>re;D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&rs,&re);m_device->CreateRootSignature(0,rs->GetBufferPointer(),rs->GetBufferSize(),IID_PPV_ARGS(&m_sceneRoot));
  D3D12_INPUT_ELEMENT_DESC il[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0}};
  D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};d.pRootSignature=m_sceneRoot.Get();d.VS={vs->GetBufferPointer(),vs->GetBufferSize()};d.PS={ps->GetBufferPointer(),ps->GetBufferSize()};d.InputLayout={il,3};d.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;d.RTVFormats[0]=DXGI_FORMAT_R8G8B8A8_UNORM;d.NumRenderTargets=1;d.DSVFormat=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.SampleMask=UINT_MAX;d.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;d.RasterizerState.CullMode=D3D12_CULL_MODE_BACK;d.RasterizerState.FrontCounterClockwise=FALSE;d.RasterizerState.DepthClipEnable=TRUE;d.BlendState.RenderTarget[0].RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;d.DepthStencilState.DepthEnable=TRUE;d.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;d.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS;return SUCCEEDED(m_device->CreateGraphicsPipelineState(&d,IID_PPV_ARGS(&m_scenePSO))); }
-
-bool Renderer::CreateSphere(){const int lon=256,lat=128;std::vector<Vertex>v;std::vector<uint32_t>idx;v.reserve((lon+1)*(lat+1));for(int j=0;j<=lat;j++){float vv=float(j)/lat;float phi=XM_PIDIV2-vv*XM_PI;for(int i=0;i<=lon;i++){float u=float(i)/lon;float lam=(u-.5f)*XM_2PI;float cp=cosf(phi);XMFLOAT3 n{cp*cosf(lam),sinf(phi),cp*sinf(lam)};v.push_back({n,n,{u,vv}});}}for(int j=0;j<lat;j++)for(int i=0;i<lon;i++){uint32_t a=j*(lon+1)+i,b=a+1,c=a+lon+1,d=c+1;idx.insert(idx.end(),{a,c,b,b,c,d});}m_indexCount=(UINT)idx.size();UINT vbBytes=(UINT)(v.size()*sizeof(Vertex)),ibBytes=(UINT)(idx.size()*4);auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto bd=BufferDesc(vbBytes);m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_vb));void*p;m_vb->Map(0,nullptr,&p);memcpy(p,v.data(),vbBytes);m_vb->Unmap(0,nullptr);bd=BufferDesc(ibBytes);m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_ib));m_ib->Map(0,nullptr,&p);memcpy(p,idx.data(),ibBytes);m_ib->Unmap(0,nullptr);m_vbv={m_vb->GetGPUVirtualAddress(),vbBytes,sizeof(Vertex)};m_ibv={m_ib->GetGPUVirtualAddress(),ibBytes,DXGI_FORMAT_R32_UINT};return true;}
 
 bool Renderer::LoadTextureWIC(const std::wstring&path){
  ComPtr<IWICImagingFactory>f;HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
@@ -97,7 +105,7 @@ bool Renderer::LoadTextureWIC(const std::wstring&path){
  std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<"Texture source "<<sw<<"x"<<sh<<", upload "<<tw<<"x"<<th<<", mip levels "<<mipCount<<", 16x anisotropic filtering\n";return true;}
 
 bool Renderer::CreateDepth(){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;d.Width=m_width;d.Height=m_height;d.DepthOrArraySize=1;d.MipLevels=1;d.Format=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.Flags=D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;D3D12_CLEAR_VALUE cv{};cv.Format=d.Format;cv.DepthStencil.Depth=1;auto hp=Heap(D3D12_HEAP_TYPE_DEFAULT);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_DEPTH_WRITE,&cv,IID_PPV_ARGS(&m_depth))))return false;m_device->CreateDepthStencilView(m_depth.Get(),nullptr,m_dsvHeap->GetCPUDescriptorHandleForHeapStart());return true;}
-bool Renderer::CreateConstantBuffer(){auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto d=BufferDesc(256);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_cb))))return false;m_cb->Map(0,nullptr,(void**)&m_cbPtr);return true;}
+bool Renderer::CreateConstantBuffer(){auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto d=BufferDesc(256*FrameCount);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_cb))))return false;m_cb->Map(0,nullptr,(void**)&m_cbPtr);return true;}
 
 // Load the tracked TrueType asset into a private DirectWrite collection. Users do
 // not need to install OrbitX Header, and the app never changes Windows font state.
@@ -230,7 +238,7 @@ bool Renderer::CreateHudBackBufferTargets(){
  return true;
 }
 
-bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateSphere()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC(m_moonTexturePath))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
+bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC(m_moonTexturePath))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
 
 bool Renderer::LoadMenuBackground(){
  ComPtr<IWICImagingFactory> f; HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
@@ -311,7 +319,7 @@ void Renderer::UpdateCB(){
  XMVECTOR up=XMVectorSet(sinph*sinth,costh,-cosph*sinth,0.0f);
  XMMATRIX view=XMMatrixLookAtRH(cam,XMVectorZero(),up);
  XMMATRIX proj=XMMatrixPerspectiveFovRH(XMConvertToRadians(m_fov),float(m_width)/m_height,1.0f,1000000.0f);
- auto moon=m_state.moonSSB();auto sd=m_state.sunSSB-moon;double n=sqrt(sd.x*sd.x+sd.y*sd.y+sd.z*sd.z);SceneCB c{};XMStoreFloat4x4(&c.mvp,XMMatrixTranspose(model*view*proj));XMStoreFloat4x4(&c.model,XMMatrixTranspose(model));c.sunDir={(float)(sd.x/n),(float)(sd.y/n),(float)(sd.z/n),0};memcpy(m_cbPtr,&c,sizeof(c));}
+ auto moon=m_state.moonSSB();auto sd=m_state.sunSSB-moon;double n=sqrt(sd.x*sd.x+sd.y*sd.y+sd.z*sd.z);SceneCB c{};XMStoreFloat4x4(&c.mvp,XMMatrixTranspose(model*view*proj));XMStoreFloat4x4(&c.model,XMMatrixTranspose(model));c.sunDir={(float)(sd.x/n),(float)(sd.y/n),(float)(sd.z/n),0};memcpy(m_cbPtr+256*m_frame,&c,sizeof(c));}
 
 void Renderer::DrawHudText(){
  ID3D11Resource* wrapped[]={m_wrappedBack[m_frame].Get()};
@@ -578,6 +586,9 @@ void Renderer::DrawHudText(){
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
  }else{
    constexpr float left=12,rightPad=12,line=22,top=8;draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);wchar_t buf[96];swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+3*line,false);swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+4*line,false);draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
+#ifdef PLANET_DEBUG_MODE
+   DrawPlanetTelemetry((float)m_width-rightPad,top+3*line);
+#endif
  }
  HRESULT hr=m_d2dContext->EndDraw();
  m_d2dContext->SetTarget(nullptr);
@@ -588,18 +599,21 @@ void Renderer::DrawHudText(){
 
 void Renderer::Update(float){UpdateCB();}
 void Renderer::Render(){
+ if(m_appState==AppState::Simulation && !UpdatePlanet()) return;
+ UpdateCB();
  m_alloc[m_frame]->Reset();m_cmd->Reset(m_alloc[m_frame].Get(),m_scenePSO.Get());
  D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=m_back[m_frame].Get();b.Transition.StateBefore=D3D12_RESOURCE_STATE_PRESENT;b.Transition.StateAfter=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;m_cmd->ResourceBarrier(1,&b);
  auto r=m_rtvHeap->GetCPUDescriptorHandleForHeapStart();r.ptr+=m_frame*m_rtvStride;auto ds=m_dsvHeap->GetCPUDescriptorHandleForHeapStart();float clear[]={0,0,0,1};m_cmd->ClearRenderTargetView(r,clear,0,nullptr);m_cmd->ClearDepthStencilView(ds,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);m_cmd->OMSetRenderTargets(1,&r,FALSE,&ds);
- D3D12_VIEWPORT vp{0,0,(float)m_width,(float)m_height,0,1};D3D12_RECT sc{0,0,(LONG)m_width,(LONG)m_height};m_cmd->RSSetViewports(1,&vp);m_cmd->RSSetScissorRects(1,&sc);m_cmd->SetGraphicsRootSignature(m_sceneRoot.Get());ID3D12DescriptorHeap*h[]={m_srvHeap.Get()};m_cmd->SetDescriptorHeaps(1,h);m_cmd->SetGraphicsRootConstantBufferView(0,m_cb->GetGPUVirtualAddress());m_cmd->SetGraphicsRootDescriptorTable(1,m_srvHeap->GetGPUDescriptorHandleForHeapStart());m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);m_cmd->IASetVertexBuffers(0,1,&m_vbv);m_cmd->IASetIndexBuffer(&m_ibv);m_cmd->DrawIndexedInstanced(m_indexCount,1,0,0,0);
+ D3D12_VIEWPORT vp{0,0,(float)m_width,(float)m_height,0,1};D3D12_RECT sc{0,0,(LONG)m_width,(LONG)m_height};m_cmd->RSSetViewports(1,&vp);m_cmd->RSSetScissorRects(1,&sc);m_cmd->SetGraphicsRootSignature(m_sceneRoot.Get());ID3D12DescriptorHeap*h[]={m_srvHeap.Get()};m_cmd->SetDescriptorHeaps(1,h);m_cmd->SetGraphicsRootConstantBufferView(0,m_cb->GetGPUVirtualAddress()+256*m_frame);
+ if(m_appState==AppState::Simulation) DrawPlanet();
  // Leave the back buffer in RENDER_TARGET. D3D11On12/Direct2D draws the vector HUD
  // and ReleaseWrappedResources performs the final RENDER_TARGET -> PRESENT transition.
  m_cmd->Close();ID3D12CommandList*l[]={m_cmd.Get()};m_queue->ExecuteCommandLists(1,l);
  DrawHudText();
  m_swap->Present(1,0);MoveToNextFrame();
 }
-void Renderer::WaitForGPU(){UINT64 v=++m_fenceValue[m_frame];m_queue->Signal(m_fence.Get(),v);if(m_fence->GetCompletedValue()<v){m_fence->SetEventOnCompletion(v,m_fenceEvent);WaitForSingleObject(m_fenceEvent,5000);}}
-void Renderer::MoveToNextFrame(){UINT64 v=++m_fenceValue[m_frame];m_queue->Signal(m_fence.Get(),v);m_frame=m_swap->GetCurrentBackBufferIndex();if(m_fence->GetCompletedValue()<m_fenceValue[m_frame]){m_fence->SetEventOnCompletion(m_fenceValue[m_frame],m_fenceEvent);WaitForSingleObject(m_fenceEvent,5000);}m_fenceValue[m_frame]=v;}
+void Renderer::WaitForGPU(){UINT64 v=++m_fenceValue[m_frame];m_queue->Signal(m_fence.Get(),v);if(m_fence->GetCompletedValue()<v){m_fence->SetEventOnCompletion(v,m_fenceEvent);WaitForSingleObject(m_fenceEvent,INFINITE);}}
+void Renderer::MoveToNextFrame(){UINT64 v=++m_fenceValue[m_frame];m_queue->Signal(m_fence.Get(),v);m_frame=m_swap->GetCurrentBackBufferIndex();if(m_fence->GetCompletedValue()<m_fenceValue[m_frame]){m_fence->SetEventOnCompletion(m_fenceValue[m_frame],m_fenceEvent);WaitForSingleObject(m_fenceEvent,INFINITE);}m_fenceValue[m_frame]=v;}
 void Renderer::Shutdown(){if(m_queue)WaitForGPU();if(m_cb)m_cb->Unmap(0,nullptr);if(m_fenceEvent)CloseHandle(m_fenceEvent);m_fenceEvent=nullptr;}
 void Renderer::Resize(UINT width,UINT height){
  if(!m_swap||width==0||height==0||(width==m_width&&height==m_height))return;
@@ -648,6 +662,11 @@ void Renderer::Resize(UINT width,UINT height){
  if(log)log<<"Resize: client="<<m_width<<"x"<<m_height<<" swapchain="<<m_width<<"x"<<m_height<<" aspect="<<(double(m_width)/double(m_height))<<"\n";
 }
 void Renderer::OnKeyDown(WPARAM k){
+ if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
+   if(k=='I'){m_boundaries=!m_boundaries;return;}
+   if(k=='O'){m_shading=!m_shading;return;}
+   if(k=='L'){m_planet.frozen=!m_planet.frozen;return;}
+ }
  if(k==VK_ESCAPE){
    // In simulation, Escape exits the active scenario back to the OrbitX main menu.
    // In menus/submenus, navigation is intentionally handled only by the on-screen BACK control.
