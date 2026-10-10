@@ -52,7 +52,7 @@ private:
     struct UploadBatch;
     bool QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatch& batch);
     bool SubmitPlanetUploads(UploadBatch& batch);
-    bool CollectPlanetUploads();
+    void CollectPlanetUploads();
     bool UpdatePlanet();
     bool BuildPlanetMesh();
     void DrawPlanet();
@@ -93,7 +93,7 @@ private:
         UINT slot{};UINT64 bytes{},touched{},lastDrawFence{},uploadFence{};
         bool ready=false;
     };
-    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; std::array<float,16> constants{}; };
+    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; };
     struct PatchMesh {
         Microsoft::WRL::ComPtr<ID3D12Resource> vb,ib;
         D3D12_VERTEX_BUFFER_VIEW vbv{};D3D12_INDEX_BUFFER_VIEW ibv{};UINT count{};
@@ -102,16 +102,9 @@ private:
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commands;
         Microsoft::WRL::ComPtr<ID3D12Resource> arena;
-        UINT8* mapped=nullptr;UINT64 capacity=0,used=0,fence=0;bool pending=false;
+        UINT8* mapped=nullptr;UINT64 capacity=0,used=0,fence=0;
         std::vector<Core::TileId> tiles;
     };
-    struct PlanetViewKey {
-        float yaw{},pitch{},distance{},fov{};UINT width{},height{};bool frozen{};
-        bool operator==(const PlanetViewKey&)const=default;
-    };
-    std::optional<PlanetViewKey> m_selectedView;
-    bool m_planetSelectionDirty=true;
-    std::vector<DdsTileLoader::Request> m_loaderRequests;
     Core::PlanetQuadtree m_planet;
     DdsTileLoader m_tileLoader;
     std::optional<DdsTileLoader::Result> m_deferredTile;

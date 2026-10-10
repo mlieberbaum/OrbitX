@@ -98,13 +98,13 @@ immutable GPU-local parameter grids are shared across patches; texture arrivals
 change bindings/UV ranges rather than rebuild geometry. Skirts hide tessellation
 seams. Fallback highlighting and elevation remain deferred.
 
-The settled scene caches its selection, texture bindings and geographic draw
-constants until the camera, viewport, freeze state or texture residency changes.
-Upload completion checks examine the three packets rather than the full texture
-cache. Empty upload command lists are not reset/submitted. The worker request
-queue is updated only when requested work changes. The HUD reuses DirectWrite
-layouts and formats diagnostic text at 10 Hz; scene constants are written once
-per rendered frame.
+Quadtree selection, request scheduling, upload completion, texture residency,
+ancestor fallback, cache eviction and drawing use the implementation from
+`e21521a` directly. Selection and draw bindings are refreshed every frame;
+upload completion scans all resident texture entries. The subsequent quadtree
+caching and upload-packet tracking optimizations have been removed.
+The HUD still reuses DirectWrite layouts and formats diagnostic text at 10 Hz;
+scene constants are written once per rendered frame.
 
 The transparent lower-center FPS graph retains up to 12 seconds of history,
 with 100 ms frame-throughput samples, a dynamic FPS scale and cached line
@@ -158,13 +158,13 @@ Camera reference: [orbitersim/orbiter Camera.cpp](https://github.com/orbitersim/
 camera; ordinary external wheel input is handled in the Orbiter core.
 [D3D9Pad.cpp](https://github.com/mschweiger/D3D9Client/blob/9043da1c2f0cf75827064c04242d096a68d2c8fb/Orbitersdk/D3D9Client/D3D9Pad.cpp)
 reuses font/text resources, while `Tilemgr2_imp.hpp::ProcessNode/RenderNode`
-retain selection state separately from drawing. OrbitX applies caching with
-explicit camera/residency invalidation instead of reducing visual quality.
+retain selection state separately from drawing. OrbitX retains its `e21521a` tile pipeline; HUD text resources are cached independently.
 
 Performance verification: the supplied RTX 3080 Ti screenshot showed roughly
 0.18 ms selection and 0.04 ms scene GPU time at about 1014 FPS. This suggests CPU
 selection and HUD work are useful first targets; it is not a complete CPU/GPU
-profile. These changes have portable automated coverage, but speedup and Windows
+profile. Portable automated checks cover camera/history behavior, and the tile implementation
+is compared directly against `e21521a`. Speedup and Windows
 rendering must be measured on the user's system. A remaining large HUD CPU time
 would justify investigating the Direct2D/D3D11On12 path; a large presentation
 wait would justify examining DXGI presentation/frame buffering. Neither change
