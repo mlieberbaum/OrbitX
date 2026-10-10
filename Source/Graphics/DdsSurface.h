@@ -15,6 +15,7 @@ struct DdsSurface {
         if(!f) throw std::runtime_error("Cannot open DDS");
         auto size=f.tellg();if(size<128 || size>64*1024*1024) throw std::runtime_error("Invalid DDS length");
         f.seekg(0);std::vector<uint8_t> raw(static_cast<size_t>(size));f.read(reinterpret_cast<char*>(raw.data()),size);
+        if(!f)throw std::runtime_error("DDS read failed");
         auto word=[&](size_t offset){uint32_t v;std::memcpy(&v,raw.data()+offset,4);return v;};
         if(word(0)!=0x20534444 || word(4)!=124 || word(76)!=32 || (word(112)&0xFE00)) throw std::runtime_error("Expected a 2D DDS surface");
         DdsSurface d;d.height=word(12);d.width=word(16);d.mips=std::max(1u,word(28));

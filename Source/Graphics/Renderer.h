@@ -17,6 +17,8 @@
 #include "../Core/PlanetQuadtree.h"
 #include <set>
 #include <chrono>
+#include <array>
+#include "DdsTileLoader.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -36,13 +38,20 @@ public:
     void SetFullscreen(bool enabled);
     const std::string& LastError() const { return m_error; }
     bool IsFullscreen() const { return m_fullscreen; }
+    void SetVSync(bool enabled);
+    bool IsVSync() const { return m_vsync; }
 private:
     static constexpr UINT FrameCount=2;
     struct Vertex { DirectX::XMFLOAT3 pos, normal; DirectX::XMFLOAT2 uv; };
     struct SceneCB { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 model; DirectX::XMFLOAT4 sunDir; };
     bool InitDevice(); bool InitAssets();
     bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool LoadBundledHeaderFont(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo(); bool LoadScenarioPreview();
-    bool LoadPlanetTile(Core::TileId id);
+    bool InitPlanetStreaming();
+    bool LoadPlanetTile(Core::TileId id); // Startup roots only.
+    struct UploadBatch;
+    bool QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatch& batch);
+    bool SubmitPlanetUploads(UploadBatch& batch);
+    void CollectPlanetUploads();
     bool UpdatePlanet();
     bool BuildPlanetMesh();
     void DrawPlanet();
@@ -56,21 +65,45 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtvHeap,m_srvHeap,m_dsvHeap;
     UINT m_rtvStride{}; Microsoft::WRL::ComPtr<ID3D12Resource> m_back[FrameCount],m_depth;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_alloc[FrameCount]; Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmd;
-    Microsoft::WRL::ComPtr<ID3D12Fence> m_fence; UINT64 m_fenceValue[FrameCount]{}; HANDLE m_fenceEvent{}; UINT m_frame{};
+    Microsoft::WRL::ComPtr<ID3D12Fence> m_fence; UINT64 m_fenceValue[FrameCount]{},m_nextFenceValue=0; HANDLE m_fenceEvent{}; UINT m_frame{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_sceneRoot; Microsoft::WRL::ComPtr<ID3D12PipelineState> m_scenePSO;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_cb; UINT8* m_cbPtr{};
 
     static constexpr UINT TileCapacity=2048;
-    struct TileResource { Microsoft::WRL::ComPtr<ID3D12Resource> texture; UINT slot{}; UINT64 bytes{}; UINT64 touched{}; };
-    struct TileDraw { Core::TileId id, source; UINT slot{}, first{}, count{}; float uv[4]{}; };
+    struct TileResource {
+        Microsoft::WRL::ComPtr<ID3D12Resource> texture;
+        UINT slot{};UINT64 bytes{},touched{},lastDrawFence{},uploadFence{};
+        bool ready=false;
+    };
+    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; };
+    struct PatchMesh {
+        Microsoft::WRL::ComPtr<ID3D12Resource> vb,ib;
+        D3D12_VERTEX_BUFFER_VIEW vbv{};D3D12_INDEX_BUFFER_VIEW ibv{};UINT count{};
+    };
+    struct UploadBatch {
+        Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commands;
+        Microsoft::WRL::ComPtr<ID3D12Resource> arena;
+        UINT8* mapped=nullptr;UINT64 capacity=0,used=0,fence=0;
+        std::vector<Core::TileId> tiles;
+    };
     Core::PlanetQuadtree m_planet;
+    DdsTileLoader m_tileLoader;
+    std::optional<DdsTileLoader::Result> m_deferredTile;
+    Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_uploadQueue;
+    Microsoft::WRL::ComPtr<ID3D12Fence> m_uploadFence;
+    UINT64 m_uploadFenceValue=0;
+    std::array<UploadBatch,3> m_uploadBatches;
+    std::array<PatchMesh,4> m_patchMeshes;
     std::map<Core::TileId,TileResource> m_tiles;
     std::set<Core::TileId> m_failedTiles;
     std::vector<TileDraw> m_tileDraws;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_planetVB,m_planetIB;
-    D3D12_VERTEX_BUFFER_VIEW m_planetVBV{};
-    D3D12_INDEX_BUFFER_VIEW m_planetIBV{};
-    bool m_boundaries=false,m_shading=false,m_planetDirty=true;
+    double m_selectMs=0,m_uploadCpuMs=0,m_readMs=0,m_presentMs=0,m_sceneGpuMs=0;
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timestampHeap;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_timestampReadback;
+    UINT64 m_timestampFrequency=0;
+    bool m_hasTimestamp[FrameCount]{};
+    bool m_boundaries=false,m_shading=false;
     UINT64 m_tileClock=0,m_tileBytes=0;
     UINT m_srvStride{};
     int m_renderedLOD=0,m_residentLOD=0;
@@ -107,8 +140,9 @@ private:
     bool m_solarSystemExpanded=false;
     bool m_scenarioSelected=false;
     int m_scenarioHover=-1; // 0: category, 1: Moon View, 2: Launch
-    int m_graphicsHover=-1; // 0: WINDOWED, 1: FULL SCREEN, -1: neither
+    int m_graphicsHover=-1; // 0: WINDOWED, 1: FULL SCREEN, 2: VSync off, 3: VSync on, -1: neither
     bool m_mouseNavigation=false;
+    bool m_vsync=false,m_tearingSupported=false;
     bool m_fullscreen=false; WINDOWPLACEMENT m_windowedPlacement{sizeof(WINDOWPLACEMENT)}; DWORD m_windowedStyle=WS_OVERLAPPEDWINDOW;
     bool m_drag=false; POINT m_dragAnchorScreen{};
 };

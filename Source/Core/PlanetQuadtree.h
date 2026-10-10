@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "PlanetCoordinates.h"
 
 namespace OrbitX::Core {
 struct TileId {
@@ -41,7 +42,7 @@ public:
                 if(parts.size()!=3) {++rejectedFiles;continue;}
                 auto number=[](const std::string& s){size_t end=0;int n=std::stoi(s,&end);if(end!=s.size())throw std::invalid_argument("index");return n;};
                 TileId id{number(parts[0]),number(parts[1]),number(entry.path().stem().string())};
-                if(id.level<4) continue; // global directories 01..03 are superseded by 04 roots / JPG fallback.
+                if(id.level<4) continue; // Older global directories 01..03 are superseded by the DDS roots.
                 if(id.level>19 || id.row<0 || id.row>=(1<<(id.level-4)) || id.column<0 || id.column>=(2<<(id.level-4))) {++rejectedFiles;continue;}
                 files[id]=entry.path();nodes.insert(id);
                 while(id.level>4) {id=id.Parent();nodes.insert(id);}
@@ -49,26 +50,37 @@ public:
         }
     }
     void Select(double cx,double cy,double cz,double radius,double pixelsPerRadian,
-                const std::function<bool(TileId)>& resident) {
+                const std::function<bool(TileId)>& resident,
+                const std::function<bool(PlanetVector,double)>& inView={}) {
         if(frozen && !leaves.empty()) return;
         leaves.clear();requests.clear();
         const double distance=std::sqrt(cx*cx+cy*cy+cz*cz);
+        auto request=[&](TileId id){if(files.contains(id)&&!resident(id))requests.push_back(id);};
         std::function<void(TileId)> visit=[&](TileId id) {
-            auto b=Bounds(id);constexpr double rad=3.14159265358979323846/180;
-            double lat=(b.north+b.south)*.5*rad,lon=(b.east+b.west)*.5*rad;
-            double x=std::cos(lat)*std::cos(lon),y=std::sin(lat),z=std::cos(lat)*std::sin(lon);
-            double angle=std::acos(std::clamp((x*cx+y*cy+z*cz)/distance,-1.0,1.0));
-            double extent=std::min(3.14159265358979323846,((b.north-b.south)+(b.east-b.west))*.5*rad);
+            auto b=Bounds(id);constexpr double rad=PlanetPi/180;
+            auto normal=SurfaceDirection((b.north+b.south)*.5*rad,(b.east+b.west)*.5*rad);
+            double angle=std::acos(std::clamp(Dot(normal,{cx,cy,cz})/distance,-1.0,1.0));
+            double extent=std::min(PlanetPi,((b.north-b.south)+(b.east-b.west))*.5*rad);
             if(angle-extent>std::acos(std::clamp(radius/distance,0.0,1.0))) return;
-            if(files.contains(id)&&!resident(id)) requests.push_back(id);
-            double nearDistance=std::max(distance-radius,std::sqrt(std::pow(cx-radius*x,2)+std::pow(cy-radius*y,2)+std::pow(cz-radius*z,2))-radius*extent);
+            if(inView && !inView(normal*radius,2*radius*std::sin(extent*.5))) return;
+            request(id);
+            auto delta=PlanetVector{cx,cy,cz}-normal*radius;
+            double nearDistance=std::max(distance-radius,std::sqrt(Dot(delta,delta))-radius*extent);
             double footprint=radius*(b.north-b.south)*rad*pixelsPerRadian/nearDistance;
             bool children=false;for(int r=0;r<2;r++)for(int c=0;c<2;c++)children|=nodes.contains({id.level+1,id.row*2+r,id.column*2+c});
             if(id.level<19 && footprint>384 && children && leaves.size()<1500) {
-                for(int r=0;r<2;r++)for(int c=0;c<2;c++)visit({id.level+1,id.row*2+r,id.column*2+c});
-            } else leaves.push_back(id);
+                bool ready=true;
+                for(int r=0;r<2;r++)for(int c=0;c<2;c++) {
+                    TileId child{id.level+1,id.row*2+r,id.column*2+c};
+                    request(child);if(files.contains(child)&&!resident(child))ready=false;
+                }
+                // D3D9 principle: render the parent until its child coverage is ready.
+                if(ready){for(int r=0;r<2;r++)for(int c=0;c<2;c++)visit({id.level+1,id.row*2+r,id.column*2+c});return;}
+            }
+            leaves.push_back(id);
         };
         visit({4,0,0});visit({4,0,1});
+        std::sort(requests.begin(),requests.end());requests.erase(std::unique(requests.begin(),requests.end()),requests.end());
     }
 };
 }
