@@ -1,5 +1,6 @@
 #include "../Core/PlanetQuadtree.h"
 #include "../Graphics/DdsSurface.h"
+#include "../Core/TexturePaths.h"
 #include <cassert>
 #include <iostream>
 using namespace OrbitX;
@@ -14,6 +15,23 @@ int main() {
     std::filesystem::create_directories(folder/"06"/"000001");
     std::ofstream(folder/"06"/"000001"/"000002.dds").put('x');
     std::ofstream(folder/"06"/"000001"/"000099.dds").put('x');
+    auto runtime=folder/"runtime",textureRoot=folder/"textures";
+    std::filesystem::create_directories(runtime/"Config"/"Bodies");
+    std::filesystem::create_directories(textureRoot/"Moon"/"Surf");
+    auto cfg=runtime/"Config"/"Bodies"/"Moon.cfg";
+    std::filesystem::path resolved;std::string error;
+    std::ofstream(cfg)<<"SurfaceTiles = Moon/Surf\n";
+    assert(Core::LoadBodySurfacePath(runtime,textureRoot,"Moon",resolved,error));
+    assert(resolved==textureRoot/"Moon"/"Surf");
+    std::ofstream(cfg)<<"SurfaceTiles = "<<folder.string()<<"\n";
+    assert(Core::LoadBodySurfacePath(runtime,textureRoot,"Moon",resolved,error));assert(resolved==folder);
+    std::ofstream(cfg)<<"Name = Moon\n";
+    assert(Core::LoadBodySurfacePath(runtime,textureRoot,"Moon",resolved,error));assert(resolved==textureRoot/"Moon"/"Surf");
+    std::ofstream(cfg)<<"SurfaceTiles = nonexistent\n";
+    assert(!Core::LoadBodySurfacePath(runtime,textureRoot,"Moon",resolved,error));
+    std::ofstream(cfg)<<"SurfaceTiles =   \n";
+    assert(!Core::LoadBodySurfacePath(runtime,textureRoot,"Moon",resolved,error));
+    // No Moon.jpg is created or required by any surface configuration test.
     Core::PlanetQuadtree tree;tree.Scan(folder);
     assert(tree.files.size()==1 && tree.rejectedFiles==1);
     assert(tree.nodes.contains({4,0,0}) && tree.nodes.contains({5,0,1}));

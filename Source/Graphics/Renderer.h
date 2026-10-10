@@ -16,6 +16,7 @@
 #include "../Core/SimulationState.h"
 #include "../Core/PlanetQuadtree.h"
 #include <set>
+#include <chrono>
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -39,7 +40,7 @@ private:
     static constexpr UINT FrameCount=2;
     struct Vertex { DirectX::XMFLOAT3 pos, normal; DirectX::XMFLOAT2 uv; };
     struct SceneCB { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 model; DirectX::XMFLOAT4 sunDir; };
-    bool InitDevice(); bool InitAssets(); bool LoadTextureWIC(const std::wstring& path);
+    bool InitDevice(); bool InitAssets();
     bool CreateScenePipeline(); bool CreateDepth(); bool CreateConstantBuffer(); bool InitVectorText(); bool LoadBundledHeaderFont(); bool CreateHudBackBufferTargets(); bool LoadMenuBackground(); bool LoadMenuLogo(); bool LoadScenarioPreview();
     bool LoadPlanetTile(Core::TileId id);
     bool UpdatePlanet();
@@ -49,7 +50,7 @@ private:
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);
 
-    HWND m_hwnd{}; UINT m_width{},m_height{}; std::wstring m_root, m_moonTexturePath; std::string m_error;
+    HWND m_hwnd{}; UINT m_width{},m_height{}; std::wstring m_root, m_surfaceRoot; std::string m_error;
     Microsoft::WRL::ComPtr<IDXGIFactory6> m_factory; Microsoft::WRL::ComPtr<ID3D12Device> m_device;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_queue; Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtvHeap,m_srvHeap,m_dsvHeap;
@@ -57,7 +58,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_alloc[FrameCount]; Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmd;
     Microsoft::WRL::ComPtr<ID3D12Fence> m_fence; UINT64 m_fenceValue[FrameCount]{}; HANDLE m_fenceEvent{}; UINT m_frame{};
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_sceneRoot; Microsoft::WRL::ComPtr<ID3D12PipelineState> m_scenePSO;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_cb,m_texture; UINT8* m_cbPtr{};
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_cb; UINT8* m_cbPtr{};
 
     static constexpr UINT TileCapacity=2048;
     struct TileResource { Microsoft::WRL::ComPtr<ID3D12Resource> texture; UINT slot{}; UINT64 bytes{}; UINT64 touched{}; };
@@ -74,6 +75,9 @@ private:
     UINT m_srvStride{};
     int m_renderedLOD=0,m_residentLOD=0;
     std::wstring m_tileStatus;
+    std::chrono::steady_clock::time_point m_fpsStart=std::chrono::steady_clock::now();
+    UINT m_fpsFrames=0;
+    double m_fps=0;
     // DirectWrite/Direct2D HUD, layered over the DX12 back buffers through D3D11On12.
     Microsoft::WRL::ComPtr<ID3D11Device> m_d3d11Device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_d3d11Context;

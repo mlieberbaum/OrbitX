@@ -30,12 +30,15 @@ void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\
 bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hwnd=hwnd;m_width=w;m_height=h;m_root=root;
  std::filesystem::path textureRoot;std::string textureError;
  if(!OrbitX::Core::LoadTextureRoot(std::filesystem::path(m_root),textureRoot,textureError)){SetError(textureError);return false;}
- std::filesystem::path moonTexture; 
- if(!OrbitX::Core::LoadMoonTexturePath(std::filesystem::path(m_root),textureRoot,moonTexture,textureError)){SetError(textureError);return false;}
- m_moonTexturePath=moonTexture.wstring();
- try { m_planet.Scan(textureRoot / L"Moon" / L"Surf"); }
- catch(const std::exception& e) { SetError(std::string("Cannot index Moon/Surf: ")+e.what());return false; }
- if(m_planet.files.empty()) m_tileStatus=L"No DDS tiles: using configured global texture";
+ std::filesystem::path surfaceRoot;
+ if(!OrbitX::Core::LoadBodySurfacePath(m_root,textureRoot,"Moon",surfaceRoot,textureError)){SetError(textureError);return false;}
+ m_surfaceRoot=surfaceRoot.wstring();
+ try {m_planet.Scan(surfaceRoot);}
+ catch(const std::exception& e){SetError(std::string("Cannot index DDS folder: ")+e.what());return false;}
+ for(int column=0;column<2;column++)if(!m_planet.files.contains({4,0,column})) {
+   SetError("Missing level 04 DDS root in "+surfaceRoot.string()+"; expected 04/000000/000000.dds and 000001.dds. JPG fallback is disabled.");return false;
+ }
+ std::ofstream(std::filesystem::path(m_root)/L"Logs"/L"OrbitX.log",std::ios::app)<<"DDS surface root "<<surfaceRoot.string()<<", indexed "<<m_planet.files.size()<<", rejected "<<m_planet.rejectedFiles<<"\n";
 #if defined(_DEBUG)
  ComPtr<ID3D12Debug> dbg; if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer();
 #endif
@@ -72,37 +75,6 @@ bool Renderer::CreateScenePipeline(){ComPtr<ID3DBlob>vs,ps,rs;std::string e;auto
  D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=3;rd.pParameters=rp;rd.NumStaticSamplers=1;rd.pStaticSamplers=&samp;rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;ComPtr<ID3DBlob>re;D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&rs,&re);m_device->CreateRootSignature(0,rs->GetBufferPointer(),rs->GetBufferSize(),IID_PPV_ARGS(&m_sceneRoot));
  D3D12_INPUT_ELEMENT_DESC il[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0}};
  D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};d.pRootSignature=m_sceneRoot.Get();d.VS={vs->GetBufferPointer(),vs->GetBufferSize()};d.PS={ps->GetBufferPointer(),ps->GetBufferSize()};d.InputLayout={il,3};d.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;d.RTVFormats[0]=DXGI_FORMAT_R8G8B8A8_UNORM;d.NumRenderTargets=1;d.DSVFormat=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.SampleMask=UINT_MAX;d.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;d.RasterizerState.CullMode=D3D12_CULL_MODE_BACK;d.RasterizerState.FrontCounterClockwise=FALSE;d.RasterizerState.DepthClipEnable=TRUE;d.BlendState.RenderTarget[0].RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;d.DepthStencilState.DepthEnable=TRUE;d.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;d.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS;return SUCCEEDED(m_device->CreateGraphicsPipelineState(&d,IID_PPV_ARGS(&m_scenePSO))); }
-
-bool Renderer::LoadTextureWIC(const std::wstring&path){
- ComPtr<IWICImagingFactory>f;HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
- if(FAILED(hr)){SetError("WIC factory failed");return false;}
- ComPtr<IWICBitmapDecoder>d;hr=f->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d);
- if(FAILED(hr)){SetError("Cannot open external Moon texture: "+std::filesystem::path(path).string()+". Check TextureRoot in OrbitX.cfg and Texture in Bodies/Moon.cfg.");return false;}
- ComPtr<IWICBitmapFrameDecode>fr;d->GetFrame(0,&fr);UINT sw,sh;fr->GetSize(&sw,&sh);
- UINT tw=sw,th=sh;const UINT maxW=8192;ComPtr<IWICBitmapSource>src=fr;
- if(sw>maxW){tw=maxW;th=(UINT)((uint64_t)sh*tw/sw);ComPtr<IWICBitmapScaler>sc;f->CreateBitmapScaler(&sc);sc->Initialize(fr.Get(),tw,th,WICBitmapInterpolationModeFant);src=sc;}
- ComPtr<IWICFormatConverter>cv;f->CreateFormatConverter(&cv);cv->Initialize(src.Get(),GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom);
- std::vector<std::vector<uint8_t>> mipData;std::vector<UINT> mipW,mipH;
- mipW.push_back(tw);mipH.push_back(th);mipData.emplace_back((size_t)tw*th*4);cv->CopyPixels(nullptr,tw*4,(UINT)mipData[0].size(),mipData[0].data());
- while(mipW.back()>1||mipH.back()>1){
-  UINT pw=mipW.back(),ph=mipH.back(),nw=std::max(1u,pw/2),nh=std::max(1u,ph/2);const auto&prev=mipData.back();std::vector<uint8_t>next((size_t)nw*nh*4);
-  for(UINT y=0;y<nh;y++)for(UINT x=0;x<nw;x++)for(UINT c=0;c<4;c++){
-   unsigned sum=0,count=0;for(UINT oy=0;oy<2;oy++)for(UINT ox=0;ox<2;ox++){UINT sx=std::min(pw-1,2*x+ox),sy=std::min(ph-1,2*y+oy);sum+=prev[((size_t)sy*pw+sx)*4+c];count++;}
-   next[((size_t)y*nw+x)*4+c]=(uint8_t)((sum+count/2)/count);
-  }
-  mipW.push_back(nw);mipH.push_back(nh);mipData.push_back(std::move(next));
- }
- const UINT mipCount=(UINT)mipData.size();
- D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=tw;td.Height=th;td.DepthOrArraySize=1;td.MipLevels=(UINT16)mipCount;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;td.SampleDesc.Count=1;
- auto hp=Heap(D3D12_HEAP_TYPE_DEFAULT);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&td,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&m_texture)))){SetError("Moon texture allocation failed");return false;}
- std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> fp(mipCount);std::vector<UINT> rows(mipCount);std::vector<UINT64> rowBytes(mipCount);UINT64 total=0;
- m_device->GetCopyableFootprints(&td,0,mipCount,0,fp.data(),rows.data(),rowBytes.data(),&total);
- auto uph=Heap(D3D12_HEAP_TYPE_UPLOAD);auto bd=BufferDesc(total);ComPtr<ID3D12Resource>up;if(FAILED(m_device->CreateCommittedResource(&uph,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&up)))){SetError("Moon upload allocation failed");return false;}
- uint8_t*map=nullptr;up->Map(0,nullptr,(void**)&map);for(UINT m=0;m<mipCount;m++)for(UINT y=0;y<mipH[m];y++)memcpy(map+fp[m].Offset+(size_t)y*fp[m].Footprint.RowPitch,mipData[m].data()+(size_t)y*mipW[m]*4,(size_t)mipW[m]*4);up->Unmap(0,nullptr);
- m_alloc[m_frame]->Reset();m_cmd->Reset(m_alloc[m_frame].Get(),nullptr);for(UINT m=0;m<mipCount;m++){D3D12_TEXTURE_COPY_LOCATION dst{m_texture.Get(),D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};dst.SubresourceIndex=m;D3D12_TEXTURE_COPY_LOCATION sr{up.Get(),D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};sr.PlacedFootprint=fp[m];m_cmd->CopyTextureRegion(&dst,0,0,0,&sr,nullptr);}
- D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=m_texture.Get();b.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_DEST;b.Transition.StateAfter=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;m_cmd->ResourceBarrier(1,&b);m_cmd->Close();ID3D12CommandList*l[]={m_cmd.Get()};m_queue->ExecuteCommandLists(1,l);WaitForGPU();
- D3D12_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=td.Format;sv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;sv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;sv.Texture2D.MipLevels=mipCount;m_device->CreateShaderResourceView(m_texture.Get(),&sv,m_srvHeap->GetCPUDescriptorHandleForHeapStart());
- std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<"Texture source "<<sw<<"x"<<sh<<", upload "<<tw<<"x"<<th<<", mip levels "<<mipCount<<", 16x anisotropic filtering\n";return true;}
 
 bool Renderer::CreateDepth(){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;d.Width=m_width;d.Height=m_height;d.DepthOrArraySize=1;d.MipLevels=1;d.Format=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.Flags=D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;D3D12_CLEAR_VALUE cv{};cv.Format=d.Format;cv.DepthStencil.Depth=1;auto hp=Heap(D3D12_HEAP_TYPE_DEFAULT);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_DEPTH_WRITE,&cv,IID_PPV_ARGS(&m_depth))))return false;m_device->CreateDepthStencilView(m_depth.Get(),nullptr,m_dsvHeap->GetCPUDescriptorHandleForHeapStart());return true;}
 bool Renderer::CreateConstantBuffer(){auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto d=BufferDesc(256*FrameCount);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_cb))))return false;m_cb->Map(0,nullptr,(void**)&m_cbPtr);return true;}
@@ -238,7 +210,7 @@ bool Renderer::CreateHudBackBufferTargets(){
  return true;
 }
 
-bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC(m_moonTexturePath))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
+bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateDepth()||!CreateConstantBuffer())return false;for(int col=0;col<2;col++)if(!LoadPlanetTile({4,0,col})){SetError("Cannot load required level 04 DDS roots from "+std::filesystem::path(m_surfaceRoot).string());return false;}if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
 
 bool Renderer::LoadMenuBackground(){
  ComPtr<IWICImagingFactory> f; HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
@@ -268,31 +240,17 @@ bool Renderer::LoadMenuLogo(){
  return true;
 }
 
-// A lightweight terrain thumbnail derived from the already-shipped lunar map.
-// Resize before uploading to Direct2D; do not decode a second full-resolution GPU texture.
+// Optional menu artwork; the scenario no longer decodes a global lunar map.
 bool Renderer::LoadScenarioPreview(){
  ComPtr<IWICImagingFactory> f;
  if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f))))return false;
  ComPtr<IWICBitmapDecoder> d;
  const auto artwork=m_root+L"\\Textures\\Menu\\MoonViewPreview.jpg";
- m_scenarioPreviewArtwork=SUCCEEDED(f->CreateDecoderFromFilename(
-     artwork.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d));
- if(!m_scenarioPreviewArtwork){
-   const auto& map=m_moonTexturePath;
-   if(FAILED(f->CreateDecoderFromFilename(map.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d)))return false;
- }
- ComPtr<IWICBitmapFrameDecode> fr;
- if(FAILED(d->GetFrame(0,&fr)))return false;
- ComPtr<IWICBitmapSource> source=fr;
- ComPtr<IWICBitmapScaler> scaler;
- if(!m_scenarioPreviewArtwork){
-   if(FAILED(f->CreateBitmapScaler(&scaler)))return false;
-   if(FAILED(scaler->Initialize(fr.Get(),1024,512,WICBitmapInterpolationModeFant)))return false;
-   source=scaler;
- }
- ComPtr<IWICFormatConverter> cv;
- if(FAILED(f->CreateFormatConverter(&cv)))return false;
- if(FAILED(cv->Initialize(source.Get(),GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return false;
+ m_scenarioPreviewArtwork=SUCCEEDED(f->CreateDecoderFromFilename(artwork.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d));
+ if(!m_scenarioPreviewArtwork)return true;
+ ComPtr<IWICBitmapFrameDecode> fr;if(FAILED(d->GetFrame(0,&fr)))return false;
+ ComPtr<IWICFormatConverter> cv;if(FAILED(f->CreateFormatConverter(&cv)))return false;
+ if(FAILED(cv->Initialize(fr.Get(),GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return false;
  return SUCCEEDED(m_d2dContext->CreateBitmapFromWicBitmap(cv.Get(),nullptr,&m_scenarioPreview));
 }
 
@@ -586,10 +544,12 @@ void Renderer::DrawHudText(){
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
  }else{
    constexpr float left=12,rightPad=12,line=22,top=8;draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);wchar_t buf[96];swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+3*line,false);swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+4*line,false);draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
+   swprintf_s(buf,L"FPS %.1f",m_fps);draw(buf,(float)m_width-rightPad,top+2*line,true);
 #ifdef PLANET_DEBUG_MODE
-   DrawPlanetTelemetry((float)m_width-rightPad,top+3*line);
+   DrawPlanetTelemetry((float)m_width-rightPad,top+4*line);
 #endif
  }
+ if(m_appState!=AppState::Simulation){wchar_t fps[64];swprintf_s(fps,L"FPS %.1f",m_fps);draw(fps,(float)m_width-12,52,true);}
  HRESULT hr=m_d2dContext->EndDraw();
  m_d2dContext->SetTarget(nullptr);
  m_d3d11On12->ReleaseWrappedResources(wrapped,1);
@@ -599,6 +559,10 @@ void Renderer::DrawHudText(){
 
 void Renderer::Update(float){UpdateCB();}
 void Renderer::Render(){
+ const auto now=std::chrono::steady_clock::now();
+ const double elapsed=std::chrono::duration<double>(now-m_fpsStart).count();
+ if(elapsed>=0.5){m_fps=m_fpsFrames/elapsed;m_fpsFrames=0;m_fpsStart=now;}
+ ++m_fpsFrames;
  if(m_appState==AppState::Simulation && !UpdatePlanet()) return;
  UpdateCB();
  m_alloc[m_frame]->Reset();m_cmd->Reset(m_alloc[m_frame].Get(),m_scenePSO.Get());

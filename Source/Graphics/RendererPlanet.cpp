@@ -28,7 +28,7 @@ bool Renderer::LoadPlanetTile(Core::TileId id) {
         while(m_tileBytes+allocation>Budget || m_tiles.size()>=TileCapacity) {
             auto oldest=m_tiles.end();
             for(auto it=m_tiles.begin();it!=m_tiles.end();++it)
-                if(!pinned.contains(it->second.slot) && (oldest==m_tiles.end() || it->second.touched<oldest->second.touched)) oldest=it;
+                if(it->first.level!=4 && !pinned.contains(it->second.slot) && (oldest==m_tiles.end() || it->second.touched<oldest->second.touched)) oldest=it;
             if(oldest==m_tiles.end()) return false;
             m_tileBytes-=oldest->second.bytes;m_tiles.erase(oldest);
         }
@@ -104,7 +104,7 @@ bool Renderer::BuildPlanetMesh() {
         auto bounds=Core::Bounds(id);Core::TileBounds sourceBounds{-90,90,-180,180};
         if(auto it=m_tiles.find(draw.source);it!=m_tiles.end()) {
             draw.slot=it->second.slot;it->second.touched=m_tileClock;sourceBounds=Core::Bounds(draw.source);m_renderedLOD=std::max(m_renderedLOD,draw.source.level);
-        } else draw.source={0,0,0};
+        } else {SetError("Selected patch has no resident DDS ancestor");return false;}
         draw.uv[0]=float((bounds.west-sourceBounds.west)/(sourceBounds.east-sourceBounds.west));
         draw.uv[1]=float((sourceBounds.north-bounds.north)/(sourceBounds.north-sourceBounds.south));
         draw.uv[2]=float((bounds.east-bounds.west)/(sourceBounds.east-sourceBounds.west));
@@ -153,7 +153,7 @@ void Renderer::DrawPlanet() {
 }
 void Renderer::DrawPlanetTelemetry(float x,float y) {
     std::wostringstream text;text<<L"BODY MOON\nRendered texture LOD "<<m_renderedLOD<<L"  Resident LOD "<<m_residentLOD
-        <<L"\nRendered leaves "<<m_tileDraws.size()<<L"  Resident DDS "<<m_tiles.size()<<L"\nPending "<<m_planet.requests.size()<<L"  Failed "<<m_failedTiles.size()
+        <<L"\nRendered leaves "<<m_tileDraws.size()<<L"  Resident DDS "<<m_tiles.size()<<L"\nIndexed DDS "<<m_planet.files.size()<<L"  Rejected "<<m_planet.rejectedFiles<<L"\nPending "<<m_planet.requests.size()<<L"  Failed "<<m_failedTiles.size()
         <<L"\nDDS GPU allocations "<<std::fixed<<std::setprecision(1)<<double(m_tileBytes)/(1024*1024)<<L" / 512 MiB"
         <<L"\nBoundaries "<<(m_boundaries?L"ON":L"OFF")<<L"  Shading "<<(m_shading?L"ON":L"OFF")<<L"\nLOD frozen "<<(m_planet.frozen?L"YES":L"NO")
         <<L"\nCtrl+I edges  Ctrl+O tint  Ctrl+L freeze";
@@ -168,7 +168,7 @@ void Renderer::DrawPlanetTelemetry(float x,float y) {
                     <<L"\nCenter lat "<<(b.south+b.north)*.5<<L" lon "<<(b.west+b.east)*.5
                     <<L"\nLat ["<<b.south<<L", "<<b.north<<L"] Lon ["<<b.west<<L", "<<b.east<<L"]"
                     <<L"\nTexture source L"<<draw.source.level<<L"\n";
-                if(draw.slot)text<<m_planet.files.at(draw.source).wstring();else text<<m_moonTexturePath;
+                text<<m_planet.files.at(draw.source).wstring();
                 break;
             }
         }

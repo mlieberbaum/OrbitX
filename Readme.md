@@ -7,13 +7,25 @@ The existing v145 toolset and Windows SDK requirements apply. `Debug_Planet` def
 `_DEBUG`, `NOMINMAX`, and `PLANET_DEBUG_MODE`; planetary textures are fully illuminated.
 Standard Debug/Release retain directional Sun lighting.
 
-`Runtime/Config/OrbitX.cfg` supplies `TextureRoot` (normally `D:\OrbitX\Textures`).
-The existing `Texture` entry in `Runtime/Config/Bodies/Moon.cfg` remains the global
-fallback image and scenario-preview source. Keep it available. Extracted DDS files
-are discovered under `TextureRoot/Moon/Surf`, preserving Orbiter's
-`04/000000/000000.dds` level/row/column hierarchy. No imagery belongs in Git.
-Directories 01–03 contain older global maps; this prototype uses the configured
-image as the global fallback and starts the quadtree at directory 04.
+`Runtime/Config/OrbitX.cfg` supplies the shared `TextureRoot`. The Moon DDS
+hierarchy has its own setting in `Runtime/Config/Bodies/Moon.cfg`:
+
+```ini
+SurfaceTiles = D:\OrbitX\Textures\Moon\Surf
+```
+
+An absolute value is independent of TextureRoot; a relative value is resolved
+against TextureRoot. If omitted, the default is `TextureRoot/Moon/Surf`. Preserve
+Orbiter's `04/000000/000000.dds` level/row/column hierarchy. Startup requires both
+`04/000000/000000.dds` and `04/000000/000001.dds`, preloads them, and pins them for
+DDS-only ancestor fallback. Missing folders/roots or unreadable roots produce a
+startup error. **Moon.jpg is neither loaded nor required**, including for the
+scenario thumbnail; optional menu artwork is independent. No imagery belongs in
+Git. Older global directories 01–03 are not used by this quadtree.
+
+FPS is displayed below TIME 1X in every build, with a half-second averaging
+interval. It also appears in menus. This reflects render-loop throughput,
+including tile-loading stalls and presentation pacing.
 
 Launch **Moon View**, then use:
 
@@ -29,7 +41,7 @@ separate highest rendered **texture source** level from highest resident DDS
 level, show drawn geometry leaves, resident/pending/failed textures, and actual
 DDS GPU allocation size. With either overlay enabled, center inspection shows
 selected geometry level/indices, geographic bounds/center, source level, and
-actual resolved path. Level 0 means the configured global image. Boundary colors
+actual resolved DDS path. Boundary colors
 follow geometry leaf level, even when its image comes from a coarser ancestor.
 The eight approved colors repeat; the HUD provides exact levels.
 
@@ -45,12 +57,13 @@ mixed tessellation cracks.
 This milestone draws spherical terrain only, with the existing fixed Moon radius
 and orientation. The body-independent selector accepts radius/camera parameters;
 the Moon renderer is its first integration. Surface folder metadata is indexed
-at startup. BC1, BC2, BC3 and supported DX10 BC7 DDS mip chains are uploaded as-is.
-Malformed/unsupported tiles log once and retain ancestor/global fallback.
+at startup. The former 8192-pixel JPG resampling cap has been removed. DDS tiles
+retain their native dimensions/mips, up to 16384 pixels per axis per resource;
+the combined quadtree surface is not limited to that size. BC1, BC2, BC3 and supported DX10 BC7 DDS mip chains are uploaded as-is.
+Malformed/unsupported detail tiles log once and retain DDS ancestor fallback.
 
 The DDS cache has a 512 MiB allocation budget and 2,048 descriptor slots; currently
-drawn textures are pinned and other textures are evicted by last use. Global
-texture, mesh, and transient uploads are excluded from the reported DDS allocation
+drawn textures are pinned and other textures are evicted by last use. Mesh and transient uploads are excluded from the reported DDS allocation
 size. The selector uses projected tile size and conservative horizon culling;
 it does not yet cull against the camera frustum. Drawn leaf count means patches
 submitted to DX12, including patches later clipped by the viewport.
@@ -62,7 +75,7 @@ and elevation are deferred.
 
 The portable test executable in `Source/Tests/PlanetSurfaceTests.cpp` checks
 Orbiter indexing, sparse hierarchy discovery, selection/freeze, BC mip parsing,
-and malformed files. It can be built separately with any C++20 compiler; it is
+malformed files, and independent absolute/relative surface configuration. It can be built separately with any C++20 compiler; it is
 not part of the application project. It was run with AddressSanitizer and
 UndefinedBehaviorSanitizer (leak tracing disabled for this container).
 Visual Studio compilation, HLSL compilation, and live DX12 rendering must still
