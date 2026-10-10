@@ -12,7 +12,7 @@ namespace OrbitX::Graphics {
 // CPU-only worker: no rendering state, GPU resources, or device context is accessed here.
 class DdsTileLoader {
 public:
-    struct Request { Core::TileId id;std::filesystem::path path; };
+    struct Request { Core::TileId id;std::filesystem::path path;bool operator==(const Request&)const=default; };
     struct Result { Core::TileId id;DdsSurface surface;std::string error;double readMs=0; };
     ~DdsTileLoader(){Stop();}
     void Start(){worker=std::thread([this]{Run();});}

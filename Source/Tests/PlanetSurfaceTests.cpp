@@ -4,6 +4,8 @@
 #include "../Core/DisplayPreferences.h"
 #include "../Graphics/DdsTileLoader.h"
 #include "../Core/MenuLayout.h"
+#include "../Core/PlanetZoom.h"
+#include "../Core/FrameRateHistory.h"
 #include <cassert>
 #include <iostream>
 using namespace OrbitX;
@@ -18,6 +20,28 @@ int main() {
     // Geographic grid winding is outward in the right-handed system.
     auto a=Core::SurfaceDirection(.01,0),b=Core::SurfaceDirection(.01,.01),e=Core::SurfaceDirection(0,0);
     assert(Core::Dot(Core::Cross(e-a,b-a),a)>0);
+    // Orbiter external camera truth cases: signed delta, fractional detents, and metre units.
+    constexpr double radius=1737.4;
+    assert(close(Core::PlanetWheelDistance(2*radius,radius,120),2*radius/1.06));
+    assert(close(Core::PlanetWheelDistance(2*radius,radius,-120),2*radius*1.06));
+    assert(close(Core::PlanetWheelDistance(2*radius,radius,60),2*radius/1.03));
+    assert(close(Core::PlanetWheelDistance(2*radius,radius,240),2*radius/1.12));
+    assert(close(Core::PlanetWheelDistance(2*radius,radius,0),2*radius));
+    auto farStep=2*radius-Core::PlanetWheelDistance(2*radius,radius,120);
+    auto nearStep=radius+.01-Core::PlanetWheelDistance(radius+.01,radius,120);
+    assert(nearStep>0&&nearStep<farStep/1000);
+    assert(Core::PlanetWheelDistance(radius+.001,radius,120)>=radius);
+    assert(close(Core::PlanetWheelDistance(.002,.001,120),.002/1.12)); // 1 metre radius: 1/Size floor.
+    Core::FrameRateHistory history;
+    for(int i=0;i<1000;i++)history.AddFrame(.001);
+    assert(history.Count()>=9&&history.Count()<=10);
+    for(size_t i=0;i<history.Count();i++)assert(close(history.At(i).fps,1000));
+    for(int i=0;i<20000;i++)history.AddFrame(.001);
+    assert(history.Count()==Core::FrameRateHistory::Capacity);
+    for(size_t i=1;i<history.Count();i++)assert(history.At(i).time>history.At(i-1).time);
+    history.AddFrame(15);assert(history.Count()==1&&history.At(0).fps<1); // hitch expires old samples.
+    history.AddFrame(0);history.AddFrame(-1);history.AddFrame(NAN);assert(history.Count()==1);
+    history.Clear();assert(history.Count()==0&&history.Time()==0);
     auto west=Core::Bounds({4,0,0}),east=Core::Bounds({4,0,1});
     assert(west.west==-180 && west.east==0 && east.west==0 && east.east==180);
     assert(west.north==90 && west.south==-90);

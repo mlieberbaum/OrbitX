@@ -19,6 +19,7 @@
 #include <chrono>
 #include <array>
 #include "DdsTileLoader.h"
+#include "../Core/FrameRateHistory.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -51,11 +52,28 @@ private:
     struct UploadBatch;
     bool QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatch& batch);
     bool SubmitPlanetUploads(UploadBatch& batch);
-    void CollectPlanetUploads();
+    bool CollectPlanetUploads();
     bool UpdatePlanet();
     bool BuildPlanetMesh();
     void DrawPlanet();
     void DrawPlanetTelemetry(float x,float y);
+    void DrawFrameRateGraph();
+    void DrawCachedHudText(const std::wstring& text,float x,float y,bool right,float maxWidth=0);
+    struct HudText {
+        std::wstring text;
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        float width=0,height=0;bool right=false;
+    };
+    std::array<HudText,16> m_hudText;
+    size_t m_hudTextIndex=0;
+    std::wstring m_telemetryText;
+    std::chrono::steady_clock::time_point m_telemetryTime{};
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_graphLine,m_graphGrid;
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> m_graphGeometry;
+    double m_graphSampleTime=-1;UINT m_graphWidth=0,m_graphHeight=0;float m_graphCeiling=0;
+    Core::FrameRateHistory m_frameHistory;
+    bool m_showFrameGraph=true;
+    std::chrono::steady_clock::time_point m_lastFrameStart{};
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);
 
@@ -75,7 +93,7 @@ private:
         UINT slot{};UINT64 bytes{},touched{},lastDrawFence{},uploadFence{};
         bool ready=false;
     };
-    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; };
+    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; std::array<float,16> constants{}; };
     struct PatchMesh {
         Microsoft::WRL::ComPtr<ID3D12Resource> vb,ib;
         D3D12_VERTEX_BUFFER_VIEW vbv{};D3D12_INDEX_BUFFER_VIEW ibv{};UINT count{};
@@ -84,9 +102,16 @@ private:
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commands;
         Microsoft::WRL::ComPtr<ID3D12Resource> arena;
-        UINT8* mapped=nullptr;UINT64 capacity=0,used=0,fence=0;
+        UINT8* mapped=nullptr;UINT64 capacity=0,used=0,fence=0;bool pending=false;
         std::vector<Core::TileId> tiles;
     };
+    struct PlanetViewKey {
+        float yaw{},pitch{},distance{},fov{};UINT width{},height{};bool frozen{};
+        bool operator==(const PlanetViewKey&)const=default;
+    };
+    std::optional<PlanetViewKey> m_selectedView;
+    bool m_planetSelectionDirty=true;
+    std::vector<DdsTileLoader::Request> m_loaderRequests;
     Core::PlanetQuadtree m_planet;
     DdsTileLoader m_tileLoader;
     std::optional<DdsTileLoader::Result> m_deferredTile;
@@ -98,7 +123,7 @@ private:
     std::map<Core::TileId,TileResource> m_tiles;
     std::set<Core::TileId> m_failedTiles;
     std::vector<TileDraw> m_tileDraws;
-    double m_selectMs=0,m_uploadCpuMs=0,m_readMs=0,m_presentMs=0,m_sceneGpuMs=0;
+    double m_selectMs=0,m_uploadCpuMs=0,m_readMs=0,m_presentMs=0,m_sceneGpuMs=0,m_sceneCpuMs=0,m_hudCpuMs=0;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timestampHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_timestampReadback;
     UINT64 m_timestampFrequency=0;

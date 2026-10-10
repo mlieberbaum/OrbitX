@@ -26,7 +26,7 @@ scenario thumbnail; optional menu artwork is independent. No imagery belongs in
 Git. Older global directories 01–03 are not used by this quadtree.
 
 FPS is displayed below TIME 1X in every build, with a half-second averaging
-interval. It also appears in menus. This reflects render-loop throughput,
+interval. It is visible only in the active simulation, never in menus or submenus. This reflects render-loop throughput,
 including presentation pacing. Graphics provides persistent **VSync OFF / ON**;
 OFF is the default and uses Present(0) with tearing support where available.
 There is no application FPS cap. ON synchronizes presentation to the display.
@@ -38,13 +38,14 @@ Launch **Moon View**, then use:
 | Ctrl+I | Toggle thin tile boundaries (default off) |
 | Ctrl+O | Independently toggle 16% tile tint (default off) |
 | Ctrl+L | Freeze/unfreeze selected leaf set; camera still moves |
-| Left drag / wheel | Existing camera rotation / zoom |
+| Right drag / wheel | Camera rotation / Orbiter planetary wheel zoom |
+| Ctrl+F | Toggle the transparent FPS history graph (default on) |
 
 In Release_Planet, diagnostics appear below the existing upper-right text. They
 separate highest rendered **texture source** level from highest resident DDS
 level, show drawn geometry leaves, resident/pending/failed textures, and actual
 DDS GPU allocation size. Timings separate selection, upload CPU work, background
-DDS reads, scene GPU execution, and presentation/frame-buffer waits. These are
+DDS reads, scene CPU/GPU execution, HUD CPU submission, and presentation/frame-buffer waits. These are
 smoothed measurements; GPU scene time excludes the Direct2D HUD. With either overlay enabled, center inspection shows
 selected geometry level/indices, geographic bounds/center, source level, and
 actual resolved DDS path. Boundary colors
@@ -97,10 +98,33 @@ immutable GPU-local parameter grids are shared across patches; texture arrivals
 change bindings/UV ranges rather than rebuild geometry. Skirts hide tessellation
 seams. Fallback highlighting and elevation remain deferred.
 
+The settled scene caches its selection, texture bindings and geographic draw
+constants until the camera, viewport, freeze state or texture residency changes.
+Upload completion checks examine the three packets rather than the full texture
+cache. Empty upload command lists are not reset/submitted. The worker request
+queue is updated only when requested work changes. The HUD reuses DirectWrite
+layouts and formats diagnostic text at 10 Hz; scene constants are written once
+per rendered frame.
+
+The transparent lower-center FPS graph retains up to 12 seconds of history,
+with 100 ms frame-throughput samples, a dynamic FPS scale and cached line
+geometry. Ctrl+F hides it while sampling continues in the simulation. Returning
+to menus clears history; no FPS text or graph is drawn in menus. Compare FPS
+with the graph both on and off to measure its cost.
+
+Wheel zoom follows Orbiter's external planetary camera equations, including
+altitude scaling, the `1e-4` floor, the inverse target-radius floor (metres),
+reciprocal inward zoom, surface-distance floor, full signed wheel delta and
+Ctrl-wheel suppression.
+The former 1800 km lower clamp and 500000 km upper clamp are removed. Float
+storage rounds the surface floor upward by less than one float spacing; the
+near clipping plane adapts to altitude. Horizontal dragging reverses its yaw
+sign; drag sensitivity and vertical behavior remain unchanged.
+
 The portable test executable in `Source/Tests/PlanetSurfaceTests.cpp` checks
 Orbiter indexing, sparse hierarchy discovery, selection/freeze, BC mip parsing,
 malformed files, independent absolute/relative surface configuration, right-handed
-axes/camera/winding, background loader results/errors and saved VSync preferences. It can be built separately with any C++20 compiler; it is
+axes/camera/winding, background loader results/errors saved VSync preferences, signed wheel zoom at multiple altitudes and a bounded FPS history. It can be built separately with any C++20 compiler; it is
 not part of the application project. It was run with AddressSanitizer and
 UndefinedBehaviorSanitizer (leak tracing disabled for this container).
 Visual Studio compilation, HLSL compilation, and live DX12 rendering must still
@@ -127,3 +151,21 @@ lifetime), `Surfmgr2.cpp` (surface patches), and `ZTreeMgr.cpp` (archive index
 versus on-demand payload reads). These principles are implemented for DX12
 queues and right-handed coordinates; the Orbiter left-handed geometry and
 projection conventions are not carried into OrbitX.
+
+Camera reference: [orbitersim/orbiter Camera.cpp](https://github.com/orbitersim/orbiter/blob/3e21f908f2f07fade86ccef4915732b0b15d172b/Src/Orbiter/Camera.cpp),
+`ProcessMouse`, `UpdateMouse`, `ShiftDist`, and `ChangeDist`. D3D9's
+`D3D9Client.cpp::RenderWndProc` handles wheel input specially for its debug
+camera; ordinary external wheel input is handled in the Orbiter core.
+[D3D9Pad.cpp](https://github.com/mschweiger/D3D9Client/blob/9043da1c2f0cf75827064c04242d096a68d2c8fb/Orbitersdk/D3D9Client/D3D9Pad.cpp)
+reuses font/text resources, while `Tilemgr2_imp.hpp::ProcessNode/RenderNode`
+retain selection state separately from drawing. OrbitX applies caching with
+explicit camera/residency invalidation instead of reducing visual quality.
+
+Performance verification: the supplied RTX 3080 Ti screenshot showed roughly
+0.18 ms selection and 0.04 ms scene GPU time at about 1014 FPS. This suggests CPU
+selection and HUD work are useful first targets; it is not a complete CPU/GPU
+profile. These changes have portable automated coverage, but speedup and Windows
+rendering must be measured on the user's system. A remaining large HUD CPU time
+would justify investigating the Direct2D/D3D11On12 path; a large presentation
+wait would justify examining DXGI presentation/frame buffering. Neither change
+is assumed necessary before measuring the new counters.

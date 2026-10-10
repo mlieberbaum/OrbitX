@@ -2,6 +2,7 @@
 #include "../Core/MenuLayout.h"
 #include "../Core/TexturePaths.h"
 #include "../Core/DisplayPreferences.h"
+#include "../Core/PlanetZoom.h"
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <algorithm>
@@ -188,6 +189,8 @@ bool Renderer::InitVectorText(){
  m_d2dContext->SetTextRenderingParams(m_textRenderingParams.Get());
  m_d2dContext->SetDpi(96.0f,96.0f);
  if(FAILED(m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(0.88f,0.92f,0.88f,1.0f),&m_textBrush)))return false;
+ if(FAILED(m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.25f,1.f,.65f,.9f),&m_graphLine)) ||
+    FAILED(m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.8f,.9f,.85f,.28f),&m_graphGrid)))return false;
 
  if(!CreateHudBackBufferTargets())return false;
  // Diagnostic proof that no hidden DPI virtualization is in the render path.
@@ -267,20 +270,65 @@ void Renderer::UpdateCB(){
  XMVECTOR cam=XMVectorSet(float(p.x),float(p.y),float(p.z),1);
  XMVECTOR up=XMVectorSet(float(u.x),float(u.y),float(u.z),0);
  XMMATRIX view=XMMatrixLookAtRH(cam,XMVectorZero(),up);
- XMMATRIX proj=XMMatrixPerspectiveFovRH(XMConvertToRadians(m_fov),float(m_width)/m_height,1.0f,1000000.0f);
+ XMMATRIX proj=XMMatrixPerspectiveFovRH(XMConvertToRadians(m_fov),float(m_width)/m_height,std::clamp((m_distanceKm-1737.4f)*.1f,.00001f,1.f),1000000.0f);
  auto moon=m_state.moonSSB();auto sd=m_state.sunSSB-moon;double n=sqrt(sd.x*sd.x+sd.y*sd.y+sd.z*sd.z);SceneCB c{};XMStoreFloat4x4(&c.mvp,XMMatrixTranspose(model*view*proj));XMStoreFloat4x4(&c.model,XMMatrixTranspose(model));c.sunDir={(float)(sd.x/n),(float)(sd.y/n),(float)(sd.z/n),0};memcpy(m_cbPtr+256*m_frame,&c,sizeof(c));}
+
+void Renderer::DrawCachedHudText(const std::wstring& text,float x,float y,bool right,float maxWidth){
+ if(m_hudTextIndex>=m_hudText.size())return;
+ auto& cached=m_hudText[m_hudTextIndex++];
+ float width=right?x:float(m_width)-x,height=float(m_height)-y;
+ if(maxWidth>0)width=std::min(width,maxWidth);
+ if(!cached.layout||cached.text!=text||cached.width!=width||cached.height!=height||cached.right!=right){
+   cached.layout.Reset();cached.text=text;cached.width=width;cached.height=height;cached.right=right;
+   if(FAILED(m_dwriteFactory->CreateTextLayout(text.c_str(),static_cast<UINT32>(text.size()),right?m_textRight.Get():m_textLeft.Get(),width,height,&cached.layout)))return;
+ }
+ m_d2dContext->DrawTextLayout(D2D1::Point2F(right?x-width:x,y),cached.layout.Get(),m_textBrush.Get());
+}
+void Renderer::DrawFrameRateGraph(){
+ // Transparent overlay matching the lower-center region in the reference screenshot.
+ float left=m_width*.20f,right=m_width*.81f,top=m_height*.865f,bottom=m_height*.97f;
+ float ceiling=100;
+ for(size_t i=0;i<m_frameHistory.Count();++i)ceiling=std::max(ceiling,float(m_frameHistory.At(i).fps));
+ ceiling=std::ceil(ceiling*1.1f/100.f)*100.f;
+ for(int i=0;i<=4;i++){
+   float y=bottom-(bottom-top)*i/4.f;
+   m_d2dContext->DrawLine(D2D1::Point2F(left,y),D2D1::Point2F(right,y),m_graphGrid.Get(),.7f);
+ }
+ m_d2dContext->DrawLine(D2D1::Point2F(left,top),D2D1::Point2F(left,bottom),m_graphGrid.Get());
+ double sampleTime=m_frameHistory.Count()?m_frameHistory.At(m_frameHistory.Count()-1).time:0;
+ if(m_graphSampleTime!=sampleTime||m_graphWidth!=m_width||m_graphHeight!=m_height||m_graphCeiling!=ceiling){
+   m_graphSampleTime=sampleTime;m_graphWidth=m_width;m_graphHeight=m_height;m_graphCeiling=ceiling;
+   m_graphGeometry.Reset();
+   auto point=[&](const Core::FrameRateHistory::Sample& sample){
+     float age=float((sampleTime-sample.time)/Core::FrameRateHistory::WindowSeconds);
+     return D2D1::Point2F(right-std::clamp(age,0.f,1.f)*(right-left),bottom-float(sample.fps)/ceiling*(bottom-top));
+   };
+   if(m_frameHistory.Count()>1 && SUCCEEDED(m_d2dFactory->CreatePathGeometry(&m_graphGeometry))){
+     ComPtr<ID2D1GeometrySink> sink;
+     if(SUCCEEDED(m_graphGeometry->Open(&sink))){
+       sink->BeginFigure(point(m_frameHistory.At(0)),D2D1_FIGURE_BEGIN_HOLLOW);
+       for(size_t i=1;i<m_frameHistory.Count();++i)sink->AddLine(point(m_frameHistory.At(i)));
+       sink->EndFigure(D2D1_FIGURE_END_OPEN);if(FAILED(sink->Close()))m_graphGeometry.Reset();
+     }else m_graphGeometry.Reset();
+   }
+ }
+ if(m_graphGeometry)m_d2dContext->DrawGeometry(m_graphGeometry.Get(),m_graphLine.Get(),1.5f);
+ DrawCachedHudText(L"FPS  |  12 SEC  |  CTRL+F",left,top-26,false);
+ wchar_t label[64];swprintf_s(label,L"0 \u2013 %.0f FPS",ceiling);DrawCachedHudText(label,right,top-26,true);
+}
 
 void Renderer::DrawHudText(){
  ID3D11Resource* wrapped[]={m_wrappedBack[m_frame].Get()};
  m_d3d11On12->AcquireWrappedResources(wrapped,1);
  m_d2dContext->SetTarget(m_d2dTarget[m_frame].Get());
  m_d2dContext->BeginDraw();
+ m_hudTextIndex=0;
 
  auto drawFmt=[&](const std::wstring& text,float x,float y,IDWriteTextFormat* fmt,ID2D1Brush* brush,bool right=false){
    D2D1_RECT_F rc=right?D2D1::RectF(0,y,x,(float)m_height):D2D1::RectF(x,y,(float)m_width,(float)m_height);
    m_d2dContext->DrawTextW(text.c_str(),(UINT32)text.size(),fmt,rc,brush,D2D1_DRAW_TEXT_OPTIONS_NONE,DWRITE_MEASURING_MODE_NATURAL);
  };
- auto draw=[&](const std::wstring&t,float x,float y,bool right){drawFmt(t,x,y,right?m_textRight.Get():m_textLeft.Get(),m_textBrush.Get(),right);};
+ auto draw=[&](const std::wstring&t,float x,float y,bool right){DrawCachedHudText(t,x,y,right);};
 
  if(m_appState!=AppState::Simulation){
    // Artwork is intentionally UI-free.  Downsample the 8K plate with high quality filtering.
@@ -540,11 +588,12 @@ void Renderer::DrawHudText(){
  }else{
    constexpr float left=12,rightPad=12,line=22,top=8;draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);wchar_t buf[96];swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+3*line,false);swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+4*line,false);draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
    swprintf_s(buf,L"FPS %.1f",m_fps);draw(buf,(float)m_width-rightPad,top+2*line,true);
+   if(m_showFrameGraph)DrawFrameRateGraph();
 #ifdef PLANET_DEBUG_MODE
    DrawPlanetTelemetry((float)m_width-rightPad,top+4*line);
 #endif
  }
- if(m_appState!=AppState::Simulation){wchar_t fps[64];swprintf_s(fps,L"FPS %.1f",m_fps);draw(fps,(float)m_width-12,52,true);}
+
  HRESULT hr=m_d2dContext->EndDraw();
  m_d2dContext->SetTarget(nullptr);
  m_d3d11On12->ReleaseWrappedResources(wrapped,1);
@@ -552,9 +601,12 @@ void Renderer::DrawHudText(){
  if(FAILED(hr)&&hr!=D2DERR_RECREATE_TARGET)SetError("Direct2D EndDraw: "+HrText(hr));
 }
 
-void Renderer::Update(float){UpdateCB();}
+void Renderer::Update(float){} // Scene constants are written once in Render().
 void Renderer::Render(){
  const auto now=std::chrono::steady_clock::now();
+ if(m_appState==AppState::Simulation && m_lastFrameStart.time_since_epoch().count())m_frameHistory.AddFrame(std::chrono::duration<double>(now-m_lastFrameStart).count());
+ if(m_appState!=AppState::Simulation){m_frameHistory.Clear();m_graphGeometry.Reset();m_graphSampleTime=-1;}
+ m_lastFrameStart=now;
  const double elapsed=std::chrono::duration<double>(now-m_fpsStart).count();
  if(elapsed>=0.5){m_fps=m_fpsFrames/elapsed;m_fpsFrames=0;m_fpsStart=now;}
  ++m_fpsFrames;
@@ -572,7 +624,9 @@ void Renderer::Render(){
  // Leave the back buffer in RENDER_TARGET. D3D11On12/Direct2D draws the vector HUD
  // and ReleaseWrappedResources performs the final RENDER_TARGET -> PRESENT transition.
  m_cmd->Close();ID3D12CommandList*l[]={m_cmd.Get()};m_queue->ExecuteCommandLists(1,l);
- DrawHudText();
+ m_sceneCpuMs=m_sceneCpuMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-now).count()*.1;
+ auto hudStart=std::chrono::steady_clock::now();DrawHudText();
+ m_hudCpuMs=m_hudCpuMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-hudStart).count()*.1;
  auto presentStart=std::chrono::steady_clock::now();
  HRESULT presented=m_swap->Present(m_vsync?1:0,(!m_vsync&&m_tearingSupported)?DXGI_PRESENT_ALLOW_TEARING:0);
  if(FAILED(presented)){SetError("Present: "+HrText(presented));return;}
@@ -652,6 +706,7 @@ void Renderer::Resize(UINT width,UINT height){
 }
 void Renderer::OnKeyDown(WPARAM k){
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
+   if(k=='F'){m_showFrameGraph=!m_showFrameGraph;return;}
    if(k=='I'){m_boundaries=!m_boundaries;return;}
    if(k=='O'){m_shading=!m_shading;return;}
    if(k=='L'){m_planet.frozen=!m_planet.frozen;return;}
@@ -752,7 +807,7 @@ void Renderer::OnMouseMove(int x,int y){
  const float rdist=m_distanceKm/radiusKm;
  const float proximity=std::max(1.0e-6f,(rdist-1.0f)/rdist);
  const float orbitPerPixel=0.0025f*proximity;
- m_yaw+=(float)dx*orbitPerPixel;
+ m_yaw-=(float)dx*orbitPerPixel;
  m_pitch-=(float)dy*orbitPerPixel;
  const float twoPi=XM_2PI;
  m_yaw=fmodf(m_yaw,twoPi);if(m_yaw<0.0f)m_yaw+=twoPi;
@@ -761,5 +816,10 @@ void Renderer::OnMouseMove(int x,int y){
 }
 void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;}}
 
-void Renderer::OnMouseWheel(short d){if(m_appState!=AppState::Simulation)return;m_distanceKm=std::clamp(m_distanceKm*(d>0?.90f:1.10f),1800.0f,500000.0f);}
+void Renderer::OnMouseWheel(short d){
+ if(m_appState!=AppState::Simulation || (GetKeyState(VK_CONTROL)&0x8000))return;
+ m_distanceKm=float(Core::PlanetWheelDistance(m_distanceKm,1737.4,d));
+ // Round Orbiter's surface floor upward when storing in float, never beneath the double-precision sphere.
+ if(m_distanceKm<1737.4)m_distanceKm=std::nextafter(1737.4f,2000.f);
+}
 }
