@@ -22,86 +22,42 @@ struct ScriptCamera {
     bool Valid()const{return std::isfinite(yaw)&&std::isfinite(pitch)&&std::isfinite(distanceKm)&&std::isfinite(fov)
         &&distanceKm>1737.4&&distanceKm<=1.e9f&&fov>0&&fov<180;}
 };
-struct CameraSample {
-    uint64_t timeUs{};ScriptCamera camera;bool checkpoint=false; // Legacy format-1 field; ignored during playback.
-    // Snapshot at the initial frozen view and each transition into frozen LOD.
-    bool frozenSelection=false;std::vector<TileId> leaves;
-};
+// Snapshot scripts intentionally do not accept the former sampled-path format.
 struct CameraScript {
     unsigned width{},height{};
-    uint64_t durationUs{};
-    std::vector<CameraSample> samples;
+    std::vector<ScriptCamera> views;
     bool Valid()const{
-        if(!width||!height||samples.empty()||samples.size()>1000000||samples.front().timeUs!=0)return false;
-        uint64_t previous=0;
-        bool wasFrozen=false;size_t leafCount=0;
-        for(const auto& s:samples){
-            if(!s.camera.Valid()||s.timeUs<previous||s.timeUs>durationUs||(!s.leaves.empty()&&!s.frozenSelection))return false;
-            if(s.frozenSelection&&!s.camera.frozen)return false;
-            if(s.camera.frozen&&!wasFrozen&&!s.frozenSelection)return false;
-            for(const auto id:s.leaves){if(id.level<4||id.level>19||id.row<0||id.row>=(1<<(id.level-4))||id.column<0||id.column>=(2<<(id.level-4)))return false;}
-            leafCount+=s.leaves.size();if(leafCount>1000000)return false;
-            previous=s.timeUs;wasFrozen=s.camera.frozen;
-        }
-        return durationUs<=24ull*60*60*1000000;
+        if(!width||!height||views.empty()||views.size()>4096)return false;
+        for(const auto& c:views)if(!c.Valid()||c.frozen)return false;
+        return true;
     }
     bool Save(const std::filesystem::path& path,std::string& error)const{
-        if(!Valid()){error="Invalid camera script";return false;}
+        if(!Valid()){error="Capture at least one valid, unfrozen snapshot";return false;}
         const auto temporary=std::filesystem::path(path.wstring()+L".tmp");
         try{
             if(std::filesystem::exists(path)||std::filesystem::exists(temporary)){error="Script name already exists";return false;}
-            std::ofstream out(temporary);out.imbue(std::locale::classic());
-            out<<std::setprecision(17)<<"ORBITX_CAMERA_SCRIPT 1 Moon\nVIEWPORT "<<width<<' '<<height<<"\nDURATION_US "<<durationUs<<'\n';
-            for(const auto& s:samples){
-                const auto p=PlanetCamera::Orbit(s.camera.yaw,s.camera.pitch,s.camera.distanceKm).position;
-                out<<"CAMERA "<<s.timeUs<<' '<<s.camera.yaw<<' '<<s.camera.pitch<<' '<<s.camera.distanceKm<<' '<<s.camera.fov
-                    <<' '<<s.camera.frozen<<' '<<s.checkpoint<<' '<<s.frozenSelection<<' '<<std::atan2(p.z,std::hypot(p.x,p.y))*180/PlanetPi
-                    <<' '<<std::atan2(p.y,p.x)*180/PlanetPi<<' '<<double(s.camera.distanceKm)-1737.4<<'\n';
-                for(const auto id:s.leaves)out<<"FROZEN_LEAF "<<id.level<<' '<<id.row<<' '<<id.column<<'\n';
-            }
-            out.close();if(!out){std::filesystem::remove(temporary);error="Cannot write camera script";return false;}
-            if(std::filesystem::file_size(temporary)>64ull*1024*1024){std::filesystem::remove(temporary);error="Script exceeds 64 MiB";return false;}
+            std::ofstream out(temporary,std::ios::binary);out.imbue(std::locale::classic());
+            out<<std::setprecision(std::numeric_limits<float>::max_digits10)<<"ORBITX_SNAPSHOT_SCRIPT 1 Moon\nVIEWPORT "<<width<<' '<<height<<'\n';
+            for(const auto& c:views)out<<"VIEW "<<c.yaw<<' '<<c.pitch<<' '<<c.distanceKm<<' '<<c.fov<<'\n';
+            out.close();if(!out){std::filesystem::remove(temporary);error="Cannot write snapshot script";return false;}
             std::filesystem::rename(temporary,path);error.clear();return true;
         }catch(const std::exception& e){error=e.what();std::error_code ignored;std::filesystem::remove(temporary,ignored);return false;}
     }
     static bool Load(const std::filesystem::path& path,CameraScript& result,std::string& error){
         try{
-            if(std::filesystem::file_size(path)>64ull*1024*1024){error="Script exceeds 64 MiB";return false;}
+            if(std::filesystem::file_size(path)>1024*1024)throw std::runtime_error("Snapshot script exceeds 1 MiB");
             std::ifstream in(path);in.imbue(std::locale::classic());CameraScript script;
             std::string key,body;int version=0;
-            if(!(in>>key>>version>>body)||key!="ORBITX_CAMERA_SCRIPT"||version!=1||body!="Moon")throw std::runtime_error("Unsupported script format or target");
+            if(!(in>>key>>version>>body)||key!="ORBITX_SNAPSHOT_SCRIPT"||version!=1||body!="Moon")throw std::runtime_error("Unsupported script: recreate using TAKE SNAPSHOT");
             if(!(in>>key>>script.width>>script.height)||key!="VIEWPORT")throw std::runtime_error("Missing viewport");
-            if(!(in>>key>>script.durationUs)||key!="DURATION_US")throw std::runtime_error("Missing duration");
-            size_t leafCount=0;
             while(in>>key){
-                if(key=="FROZEN_LEAF"){
-                    TileId id;
-                    if(script.samples.empty()||!script.samples.back().frozenSelection||!(in>>id.level>>id.row>>id.column)||++leafCount>1000000)throw std::runtime_error("Invalid frozen selection");
-                    script.samples.back().leaves.push_back(id);continue;
-                }
-                CameraSample sample;int frozen=0,checkpoint=0,frozenSelection=0;double latitude=0,longitude=0,altitude=0;
-                if(key!="CAMERA"||!(in>>sample.timeUs>>sample.camera.yaw>>sample.camera.pitch>>sample.camera.distanceKm>>sample.camera.fov>>frozen>>checkpoint>>frozenSelection>>latitude>>longitude>>altitude)
-                    ||(frozen!=0&&frozen!=1)||(checkpoint!=0&&checkpoint!=1)||(frozenSelection!=0&&frozenSelection!=1)||!std::isfinite(latitude)||!std::isfinite(longitude)||!std::isfinite(altitude))throw std::runtime_error("Invalid camera sample");
-                sample.camera.frozen=frozen!=0;sample.checkpoint=checkpoint!=0;sample.frozenSelection=frozenSelection!=0;script.samples.push_back(sample);
-                if(script.samples.size()>1000000)throw std::runtime_error("Too many camera samples");
+                ScriptCamera c;
+                if(key!="VIEW"||!(in>>c.yaw>>c.pitch>>c.distanceKm>>c.fov))throw std::runtime_error("Invalid snapshot");
+                script.views.push_back(c);if(script.views.size()>4096)throw std::runtime_error("Too many snapshots");
             }
-            if(!in.eof()||!script.Valid())throw std::runtime_error("Invalid camera timeline");
+            if(!in.eof()||!script.Valid())throw std::runtime_error("Invalid snapshot script");
             result=std::move(script);error.clear();return true;
         }catch(const std::exception& e){error=e.what();return false;}
     }
 };
-// Recorded pauses are ordinary repeated camera samples, not loader-controlled waits.
-struct ScriptClock {
-    uint64_t start{};
-    uint64_t Elapsed(uint64_t now)const{return now-start;}
-};
-inline ScriptCamera InterpolateCamera(const CameraSample& a,const CameraSample& b,uint64_t timeUs){
-    if(timeUs>=b.timeUs)return b.camera;
-    if(timeUs<=a.timeUs||b.timeUs<=a.timeUs)return a.camera;
-    const double t=double(timeUs-a.timeUs)/double(b.timeUs-a.timeUs);
-    auto angle=[&](float first,float second){return float(double(first)+std::remainder(double(second)-first,2*PlanetPi)*t);};
-    auto linear=[&](float first,float second){return float(double(first)+(double(second)-first)*t);};
-    return {angle(a.camera.yaw,b.camera.yaw),angle(a.camera.pitch,b.camera.pitch),
-        linear(a.camera.distanceKm,b.camera.distanceKm),linear(a.camera.fov,b.camera.fov),a.camera.frozen};
-}
 }

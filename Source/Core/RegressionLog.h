@@ -4,29 +4,19 @@
 #include <array>
 
 namespace OrbitX::Core {
-inline constexpr uint64_t RegressionMinimumDwellUs=4000000;
+inline constexpr uint64_t SnapshotSteadyUs=2000000,SnapshotHoldUs=10000000,SnapshotBucketUs=100000,SnapshotTimeoutUs=120000000;
+// Canonical elapsed time excludes adaptive loading and confirmation waits.
 struct RegressionView {uint64_t timeUs{},endUs{};ScriptCamera camera;};
-inline std::vector<RegressionView> RegressionViews(const CameraScript& script){
-    std::vector<RegressionView> views;size_t begin=0;
-    for(size_t end=1;end<=script.samples.size();++end){
-        if(end<script.samples.size()&&script.samples[end].camera==script.samples[begin].camera)continue;
-        const auto& first=script.samples[begin];const auto& last=script.samples[end-1];
-        if(last.timeUs-first.timeUs>RegressionMinimumDwellUs)views.push_back({last.timeUs-100000,last.timeUs,first.camera});
-        begin=end;
-    }
-    return views;
+inline RegressionView SnapshotRegressionView(size_t index,ScriptCamera camera){
+    const auto t=(index+1)*SnapshotHoldUs;return {t,t,camera};
 }
-// Versioned, explicitly byte-ordered signature of camera commands, independent
-// of filename, wall clock, GPU allocation, and legacy checkpoint markers.
 inline uint64_t ScriptSignature(const CameraScript& script){
     uint64_t hash=14695981039346656037ull;
     auto number=[&](uint64_t value){for(int i=0;i<8;++i){hash^=value&255;hash*=1099511628211ull;value>>=8;}};
-    number(script.width);number(script.height);number(script.durationUs);number(script.samples.size());
-    for(const auto& s:script.samples){
-        number(s.timeUs);number(std::bit_cast<uint32_t>(s.camera.yaw));number(std::bit_cast<uint32_t>(s.camera.pitch));
-        number(std::bit_cast<uint32_t>(s.camera.distanceKm));number(std::bit_cast<uint32_t>(s.camera.fov));number(s.camera.frozen);
-        number(s.frozenSelection);number(s.leaves.size());
-        for(auto id:s.leaves){number(id.level);number(id.row);number(id.column);}
+    number(1);number(script.width);number(script.height);number(script.views.size());
+    for(const auto& c:script.views){
+        number(std::bit_cast<uint32_t>(c.yaw));number(std::bit_cast<uint32_t>(c.pitch));
+        number(std::bit_cast<uint32_t>(c.distanceKm));number(std::bit_cast<uint32_t>(c.fov));
     }
     return hash;
 }
@@ -46,7 +36,7 @@ public:
     bool Active()const{return active;}
     const std::string& Error()const{return error;}
     const std::filesystem::path& Path()const{return path;}
-    bool Start(const std::filesystem::path& directory,const CameraScript& script,size_t views,bool illuminated){
+    bool Start(const std::filesystem::path& directory,const CameraScript& script,size_t views,bool illuminated,bool overlay=false,bool graph=false,bool vsync=false){
         if(active)return false;
         if(file.is_open())file.close();file.clear();error.clear();incomplete=0;
         try{
@@ -55,9 +45,10 @@ public:
             file.open(path,std::ios::out|std::ios::binary);file.imbue(std::locale::classic());
             if(!file){error="Cannot open regression log";return false;}
             active=true;file<<std::setprecision(std::numeric_limits<float>::max_digits10);
-            Line(0);file<<"REGRESSION format=1 body=Moon radius_km=1737.4 policy=stationary_tail dwell_policy=2 minimum_pause_us="<<RegressionMinimumDwellUs<<" dwell_comparison=GT margin_us=100000 stable_checks=4\n";
+            Line(0);file<<"REGRESSION format=2 body=Moon radius_km=1737.4 policy=snapshots cache=ROOT_ONLY time=CANONICAL_HOLD steady_us="<<SnapshotSteadyUs<<" hold_us="<<SnapshotHoldUs<<"\n";
             Line(0);file<<"INPUT script_signature="<<std::hex<<ScriptSignature(script)<<std::dec
-                <<" duration_us="<<script.durationUs<<" viewport="<<script.width<<","<<script.height<<" views="<<views<<" illumination="<<(illuminated?"FULL":"STANDARD")<<'\n';
+                <<" viewport="<<script.width<<","<<script.height<<" views="<<views<<" illumination="<<(illuminated?"FULL":"STANDARD")
+                <<" overlay="<<overlay<<" graph="<<graph<<" vsync="<<vsync<<'\n';
             Check();return active;
         }catch(const std::exception& e){error=e.what();active=false;return false;}
     }

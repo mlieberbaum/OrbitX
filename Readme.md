@@ -178,155 +178,89 @@ wait would justify examining DXGI presentation/frame buffering. Neither change
 is assumed necessary before measuring the new counters.
 
 
-## Environmental camera scripts and Full logging
+## Environmental snapshot scripts
 
-Load Moon View normally, then press **Ctrl+R** to toggle the green glass panel.
-The **Record** tab accepts a script name; **START RECORDING** hides the panel and
-records camera states at a target **100 Hz** while the existing drag/wheel controls work.
-Ctrl+R reopens it without pausing recording. **STOP & SAVE** closes the panel
-and saves the camera script and diagnostic log. Scenario exit and shutdown also save and close an active recording.
+Load Moon View normally and use **Ctrl+R** to toggle the green glass panel.
+On **Record**, name a script and click **START RECORDING**. No camera samples are
+captured automatically. Position the camera, reopen the panel, and click
+**TAKE SNAPSHOT** for each desired view. The panel confirms the capture and shows
+its count. Ctrl+R hides it for the next camera movement. **STOP & SAVE** writes
+ordered views into `Runtime/Scripts`; recording also saves on scenario exit or
+shutdown. LOD must be unfrozen when starting or capturing. Existing mouse controls
+and camera orientation, including continuous pole crossings, are unchanged.
 
-The **Run** tab lists saved `.oxscript` files from **OrbitX/Runtime/Scripts**.
-Click a row to select it; use the mouse wheel to scroll additional scripts.
-**RUN SCRIPT** hides the panel and replays the camera path on its original
-monotonic timeline. Every render frame interpolates angles along the shortest
-wrapped arc and linearly interpolates distance/FOV between timestamped samples.
-Actual sample endpoints are reproduced exactly. Repeated stationary samples keep
-your manually recorded loading pauses. There are no checkpoints or automatic
-waits for tile loading. LOD-freeze transitions are discrete commands captured at
-their input timestamps. The sample target is 10 ms; if rendering falls below
-100 Hz, samples use the actual available frame times rather than inventing
-historical positions. Sampling is an approximation of the camera between samples,
-not an identical recording of every rendered frame.
+The sampled 100 Hz path format and interpolation have been removed. Old scripts
+must be recreated. Snapshot scripts store viewport and exact float camera angles,
+distance and FOV. Runs require the recorded viewport. Validation limits scripts
+to 1 MiB and 4096 views. Saves use a temporary file and rename, never overwrite
+an existing script, and report errors. Closing the app abruptly can lose unsaved
+views. Scripts and logs are ignored by Git.
 
-Logging options are **Benchmark**, **Full**, and **Regression**. Full is the
-existing livestream diagnostic trace. Regression is available for saved-script
-playback on the Run tab; Benchmark remains disabled.
-Full mode leaves overlays and the FPS graph active according to user settings.
-Regression saves those states, disables both during playback, and restores them
-on completion/cancellation/failure. Ctrl+O/Ctrl+F changes are ignored during a
-regression run.
-Playback temporarily owns camera/LOD controls. Ctrl+R can show or hide the panel
-without pausing playback; **STOP SCRIPT** cancels and closes the panel. Completion,
-cancellation, log failure and scenario exit restore the pre-run camera,
-FOV, LOD-freeze state, overlays and graph. If the original LOD was frozen, its
-selected leaves and dependency state are restored too. Textures remain cached.
+On **Run**, select a script (wheel scrolls), select **Benchmark**, **Regression**
+or **Full**, then **RUN SCRIPT**. The panel closes. Each view:
 
-Camera scripts are separate from logs. They contain an initial camera state,
-viewport, duration, microsecond-timed samples and LOD-freeze
-changes. Legacy format-1 checkpoint markers are accepted but ignored. Geographic latitude/longitude/altitude metadata accompanies exact float
-orbit angles, distance and FOV, preserving existing pole-crossing orientation
-without changing the camera math. Initial frozen selection and later transitions
-into frozen LOD carry selected-leaf snapshots. Replays require the recorded
-viewport size; resizing stops an active recording or playback. Script files are
-written on stop via a temporary file and renamed on success, never overwriting
-an existing recording. Names use a start-time suffix; paths and logs are ignored
-by Git. Failed writes are reported. Abrupt termination can lose the in-memory
-camera recording. Format validation caps input size at 64 MiB, duration at 24
-hours, and samples/frozen-leaf records at one million each.
+1. Drains/discards prior DDS reads and waits for both GPU queues before clearing
+   detailed tiles, failures and deferred work. The two resident roots, index,
+   meshes and upload arenas remain. Cleanup is outside the loading timer.
+2. Applies the snapshot and starts the loading timer before selection/loading.
+3. Requires ready dependencies, no pending requests or inappropriate ancestor
+   fallback, valid source/descriptor mapping and identical camera/selection/draw
+   state for **two seconds**. Coverage is checked each frame; full integrity and
+   scene-state checks run at 10 Hz. Benchmark skips full snapshot allocation and
+   integrity rechecks during the steady measurement window, retaining the cheap
+   per-frame coverage checks. Changes reset confirmation. A 120-second
+   timeout records TIMEOUT and advances to the next view.
+4. Measures **ten seconds** of completed render-loop frames in approximately
+   100-ms buckets. Bucket durations are actual elapsed time, not assumed 100 ms;
+   the final frame can extend the window slightly. Coverage changes mark UNSTABLE.
 
-Playback uses the **existing cache**, recorded in the Full log. It reproduces
-camera commands, not the asynchronous read/upload schedule. For comparable cold
-runs, restart OrbitX and use the same scenario, viewport, build and texture set;
-warm replay intentionally benefits from already-cached tiles. Automated
-baseline comparison and benchmark measurements will be added separately.
+Only **Benchmark** hides overlays/FPS graph and restores their previous states.
+Regression and Full preserve them; their settings are recorded. Reopening the
+panel or changing overlay/graph settings during a run invalidates results as
+SETTINGS_CHANGED because measurement conditions changed. Ctrl+R still works;
+**STOP SCRIPT** cancels and closes the panel. Completion, cancellation, resize,
+log failure, scenario exit and shutdown restore the original camera/FOV/LOD
+freeze state (including frozen leaves/dependencies). The test's final cache is
+retained; the pre-test detailed cache is not reconstructed. Benchmark prevents
+Ctrl+O/Ctrl+F changes while running. Resize stops recording or execution.
 
-Logs are written to **OrbitX/Runtime/Logs**, using the Visual Studio Runtime working
-directory, e.g. `Livestream_2026-10-10_210445_123456.log`. Filenames use recording
-start time; timestamps use local system time with six fractional digits and no
-timezone suffix. Every line includes a global sequence, render frame number and
-monotonic elapsed microseconds, followed by one event. DDS-worker events are
-serialized with render-thread events. Timestamp precision does not guarantee that
-all events have distinct timestamps; the sequence number resolves ties.
+All results go into **OrbitX/Runtime/Logs**. `Performance_N.csv` contains per-view
+loading time (including two-second confirmation), measured duration, frame count,
+mean FPS, status and each steady-window bucket's frame count/duration/FPS.
+A separate continuous 10-Hz bucket series spans the entire run, including
+loading and cache-reset stalls, tagged LOADING, RESET_LOADING, MEASURING or MIXED.
+This exposes the FPS hit during streaming; actual bucket duration includes stalls. Data accumulates in
+memory and writes once on stop; Benchmark and Regression never activate Full
+tracing. FPS measures render-loop throughput including HUD and presentation,
+not GPU completion or displayed refresh rate. Keep build, viewport, textures,
+VSync and display settings consistent. ROOT_ONLY resets our renderer cache;
+Windows' disk cache is uncontrolled, so these are not guaranteed cold disk reads.
 
-The top-left HUD shows LAT, LON, ALT, DIST and FOV. ALT is camera distance minus
-the current Moon sphere radius (1737.4 km), displayed in kilometres to one decimal
-place; it is not yet adjusted for terrain elevation.
+**Regression** also writes `Regression_N.log`: canonical, sorted camera/scene,
+selected-tile and draw tile/source/grid/index/UV records, with settings and script
+signature. No system time, loading time, FPS, physical slots, fences or worker
+order appear. `elapsed_us` is a **canonical hold timeline**, ten seconds per view,
+excluding variable loading waits. It is deliberately not actual run duration.
+A healthy run ends `RESULT status=COMPLETE`; compare against an approved baseline
+using Beyond Compare. Identical INVALID logs are not a pass. These checks verify
+stable CPU selection and submitted drawing inputs, not texture payloads or pixels.
+Performance measurements are separate so they cannot disturb byte comparison.
 
-The format-2 trace includes initial resident/failed/queued/in-flight state,
-camera and matrix changes, inputs/settings, loading/cancellation/results, upload
-submission and activation, actual evictions with reasons and GPU fence values.
-Draw records use `level/row/column` IDs and include actual texture sources and UV
-ranges. `DRAW_PATCH` updates a patch; `DRAW_REMOVE` removes it. Request changes use
-`REQUEST_ADD`/`REQUEST_REMOVE`. Apply these deltas to reconstruct each frame's
-coverage against the same DDS collection. Branch state changes identify the first
-missing child when coverage is retained. Each frame has compact cache/LOD/fence and
-timing summaries. Unchanged traversal queries, candidate-by-candidate eviction
-scans, repeated draw submissions and repeated camera/matrix snapshots are omitted.
-This diagnostic log is a state/event trace, not a screenshot/video capture.
-Replay uses the separate camera script, not the diagnostic log; the log does not
-record every intermediate selection calculation.
+**Full** retains the existing livestream diagnostic events and additionally logs
+snapshot starts, cache-reset evictions, steady-state arrival and completion.
+`Livestream_<local-start-date-time-microseconds>.log` includes system timestamps,
+monotonic elapsed microseconds, sequence and frame number. It includes initial
+state, camera/input/settings, loading/cancellation, upload/activation, evictions
+and fences, and changed draw/request/branch states. Numeric comparisons suppress
+unchanged diagnostics. Full is synchronous and affects throughput; use Benchmark
+for speed comparisons. Recording views uses Full tracing for manual exploration.
 
-Full logging intentionally records synchronously through a thread-safe buffered
-stream. Draw, branch, camera and matrix states are compared numerically before
-message formatting or logger locking; unchanged states skip both. Change caches
-reset for each recording, and removed/reappearing patches emit fresh records.
-Recording can still reduce FPS and affect asynchronous completion timing;
-use it for diagnosis, not performance measurement. When inactive, log builders are
-skipped before formatting/locking/I/O. Open/write/flush failures are reported;
-records are never silently dropped from a bounded queue. The completed file has a
-`TRACE_STOP` terminal event unless an I/O failure or abrupt process termination
-prevents it. Streamed textures remain cached after stopping; playback restores the prior
-camera while manual recording leaves the camera where exploration ended.
+The top-left ALT readout is distance minus the Moon's spherical radius, not DEM
+height. Normal cache capacity/budget, selection/refinement, loading order, upload
+budgets, rendering/shaders, HUD and camera math are unchanged.
 
-Portable verification: `Source/Tests/EnvironmentTraceTests.cpp` checks timestamp
-format, event sequencing, concurrent writers, close/restart and failure recovery,
-panel hit regions, and identical traced/untraced quadtree leaves and requests over
-equatorial and polar views. `PlanetSurfaceTests.cpp` remains the existing baseline.
-`Source/Tests/CameraScriptTests.cpp` checks exact camera round-tripping through
-pole views, frozen-selection snapshots, invalid-file rejection, overwrite
-protection, smooth interpolation, angular wrap and recorded pauses. Windows build, panel appearance and
-real DDS streaming require local verification.
-
-All four Visual Studio configurations enable **Multi-processor Compilation**
-(`/MP`) for parallel C++ compilation. This changes build scheduling only; it does
-not add game/render threads or alter runtime behavior.
-
-## Canonical regression logs
-
-Select a saved script on the Run tab, select **Regression**, then **RUN SCRIPT**.
-Logs are `Runtime/Logs/Regression_1.log`, `Regression_2.log`, etc., without
-system-time filenames or timestamps. Existing logs are never overwritten.
-Every record uses **elapsed script microseconds**. Completed-run end time and
-capture times come from the saved script, not the frame number or wall clock.
-The UTF-8/ASCII-compatible text has LF newlines and classic-locale round-trip
-float precision, so Beyond Compare can compare the complete files byte-for-byte.
-
-The capture policy finds unchanged camera runs lasting **strictly longer than 4 seconds** and
-samples coverage **100 ms before each pause ends**. It does not add checkpoints,
-move/hold the camera, change playback speed, or wait for loading. Five observations
-at 100-ms intervals near each capture test stability; at least four consecutive
-ready, identical camera/scene/selection/draw snapshots are required. The current
-Moon_Camera_Path_Regression_1 script yields **10** comparison views.
-Dwell policy version 2 records the 4,000,000-us threshold and strict greater-than
-comparison in the header. Existing camera scripts require no re-recording; create
-a new baseline because earlier policy logs captured a different set of views.
-
-Only the deterministic drawing inputs/results are recorded: script signature,
-viewport/body/illumination mode, camera, actual scene matrices/sun direction,
-selected tile IDs and draw tile/source IDs, mesh grid/index count and UV mapping.
-Tile records are sorted. Source readiness, descriptor-to-source correspondence,
-selection/draw coverage, dependency readiness and fallback status are checked.
-Wall timestamps, build dates, script filename/path, render frame numbers, FPS,
-GPU fences/physical slots, cache population/LRU order, worker timings, loading
-and eviction sequence are excluded. The Full trace remains unchanged and is the
-appropriate mode for diagnosing transient loading/eviction behavior.
-
-A healthy run ends with **RESULT status=COMPLETE** and zero incomplete views.
-Pending loading, active fallback, DDS failures, invalid coverage/bindings,
-unsettled snapshots, missed capture windows, cancellation and log errors make
-it **INVALID**. Two identical INVALID files are not a passing comparison. If a
-view is incomplete, re-record a longer pause or fix its loading problem; replay
-will never extend the recording automatically. Capture windows missed because
-of long stalls also invalidate the run.
-
-To establish a baseline, restart OrbitX, use the same scenario, texture collection,
-viewport and illumination configuration, run the approved camera path in
-Regression, verify COMPLETE, and retain that log. Repeat after a change and compare
-against the baseline. Changes in GPU slot allocation or asynchronous read order
-should not affect a fully settled comparison. A differing or INVALID log needs
-inspection. These snapshots verify stable CPU selection and submitted draw inputs;
-they do not compare every transient frame, texture file contents or rendered pixels.
-`Source/Tests/RegressionLogTests.cpp` verifies canonical byte equality, detected
-changes to source/UV/grid/matrices, planned capture times, incomplete-result
-handling and file-error recovery. Windows/DX12 end-to-end verification is local.
+Portable tests cover camera serialization, malformed/old formats, polar views,
+canonical equality and changed draw inputs, timing/reset/stability/timeout,
+actual-duration buckets, worker reset, tracing and the existing surface baseline.
+Windows Visual Studio/HLSL/DX12 execution and panel appearance require local tests.
+All four Visual Studio configurations retain multi-processor compilation (`/MP`).

@@ -30,6 +30,12 @@ public:
         {std::lock_guard lock(mutex);stopping=true;}
         wake.notify_all();if(worker.joinable())worker.join();
     }
+    // Script-only reset: drain an active read before new requests can reuse its
+    // tile ID. No stale completion can refill the next view's cold cache.
+    void Reset(){
+        std::unique_lock lock(mutex);wanted.clear();queue.clear();ready.clear();readyBytes=0;
+        wake.notify_all();wake.wait(lock,[&]{return !active;});
+    }
     void SetRequests(const std::vector<Request>& requests){
         std::lock_guard lock(mutex);wanted.clear();for(const auto& r:requests)wanted.insert(r.id);
         if(trace&&trace->Active())for(const auto& r:queue)if(!wanted.contains(r.id))TraceTile("READ_CANCEL reason=NO_LONGER_REQUESTED",r.id);

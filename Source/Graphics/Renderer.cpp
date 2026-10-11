@@ -623,11 +623,8 @@ void Renderer::Render(){
  if((m_traceSession&&!m_trace.Active())||(m_regressionSession&&!m_regressionLog.Active()))StopLivestream("LOG_IO_FAILURE");
  ++m_traceFrame;
  if(m_trace.Active())m_trace.SetFrame(m_traceFrame);
- if(m_scriptOperation==ScriptOperation::Recording){
-   if(m_cameraScript.width!=m_width||m_cameraScript.height!=m_height)StopLivestream("VIEWPORT_CHANGED");
-   else if(m_cameraScript.samples.size()>=999999||std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()-m_scriptClock.start>=24ull*60*60*1000000)StopLivestream("SCRIPT_LIMIT_REACHED");
-   else RecordCamera();
- }
+ if(m_scriptOperation==ScriptOperation::Recording&&
+    (m_cameraScript.width!=m_width||m_cameraScript.height!=m_height))StopLivestream("VIEWPORT_CHANGED");
  if(m_scriptOperation==ScriptOperation::Playing)UpdateScriptPlayback();
  if(m_trace.Active())TraceCamera("CAMERA_STATE");
  const auto now=std::chrono::steady_clock::now();
@@ -637,9 +634,9 @@ void Renderer::Render(){
  const double elapsed=std::chrono::duration<double>(now-m_fpsStart).count();
  if(elapsed>=0.5){m_fps=m_fpsFrames/elapsed;m_fpsFrames=0;m_fpsStart=now;}
  ++m_fpsFrames;
- if(m_appState==AppState::Simulation && !UpdatePlanet()) return;
+ if(m_appState==AppState::Simulation && !UpdatePlanet()){if(m_scriptOperation==ScriptOperation::Playing)StopLivestream("RENDER_FAILURE");return;}
  UpdateCB();
- if(m_regressionSession)CaptureRegression();
+ if(m_scriptOperation==ScriptOperation::Playing)CaptureRegression();
  if(m_trace.Active()){
    TraceFrameSnapshot();
    SceneCB scene{};memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));
@@ -668,8 +665,9 @@ void Renderer::Render(){
  m_hudCpuMs=m_hudCpuMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-hudStart).count()*.1;
  auto presentStart=std::chrono::steady_clock::now();
  HRESULT presented=m_swap->Present(m_vsync?1:0,(!m_vsync&&m_tearingSupported)?DXGI_PRESENT_ALLOW_TEARING:0);
- if(FAILED(presented)){SetError("Present: "+HrText(presented));return;}
+ if(FAILED(presented)){SetError("Present: "+HrText(presented));if(m_scriptOperation==ScriptOperation::Playing)StopLivestream("RENDER_FAILURE");return;}
  MoveToNextFrame();
+ if(m_scriptOperation==ScriptOperation::Playing)CompleteScriptFrame();
  m_presentMs=m_presentMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentStart).count()*.1;
  m_trace.Log([&](auto& out){out<<"FRAME_END scene_cpu_ms="<<m_sceneCpuMs<<" hud_cpu_ms="<<m_hudCpuMs
    <<" scene_gpu_ms="<<m_sceneGpuMs<<" present_wait_ms="<<m_presentMs<<" fps="<<m_fps;});
@@ -751,8 +749,8 @@ void Renderer::OnKeyDown(WPARAM k){
  m_trace.Log([&](auto& out){out<<"INPUT_KEY key="<<k<<" ctrl="<<bool(GetKeyState(VK_CONTROL)&0x8000);});
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
    if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;m_scriptNameFocused=false;if(m_scriptPanelOpen&&m_scriptOperation==ScriptOperation::Idle)RefreshScripts();TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
-   if(k=='F'&&!m_regressionSession){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
-   if(k=='O'&&!m_regressionSession){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
+   if(k=='F'&&!(m_scriptOperation==ScriptOperation::Playing&&m_scriptLogging==ScriptLogging::Benchmark)){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
+   if(k=='O'&&!(m_scriptOperation==ScriptOperation::Playing&&m_scriptLogging==ScriptLogging::Benchmark)){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
    if(k=='L'&&m_scriptOperation!=ScriptOperation::Playing){m_planet.frozen=!m_planet.frozen;TraceCamera("LOD_FREEZE_TOGGLE");return;}
  }
  if(k==VK_ESCAPE){

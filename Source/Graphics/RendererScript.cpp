@@ -43,9 +43,9 @@ void Renderer::DrawScriptPanel(){
         auto name=m_scriptName+(m_scriptNameFocused?L"_":L"");
         text(name.c_str(),l.script.left+16*l.scale,l.script.top+46*l.scale,m_scriptGreen.Get());
         text(L"Click to name / letters, numbers, spaces, - and _",l.script.left+16*l.scale,l.script.top+94*l.scale,m_scriptDisabled.Get());
-        text(L"Camera path sampled at 100 Hz / pauses are recorded too.",l.script.left+16*l.scale,l.script.top+122*l.scale,m_scriptWhite.Get());
+        text(L"Position camera / reopen panel / TAKE SNAPSHOT.",l.script.left+16*l.scale,l.script.top+122*l.scale,m_scriptWhite.Get());
     }else{
-        if(m_savedScripts.empty())text(L"No saved scripts / record a camera path first",l.script.left+16*l.scale,l.script.top+16*l.scale,m_scriptDisabled.Get());
+        if(m_savedScripts.empty())text(L"No saved scripts / capture camera snapshots first",l.script.left+16*l.scale,l.script.top+16*l.scale,m_scriptDisabled.Get());
         for(size_t row=0;row<5&&m_scriptListOffset+row<m_savedScripts.size();++row){
             const size_t i=m_scriptListOffset+row;
             auto name=(i==m_selectedScript?L">  ":L"   ")+m_savedScripts[i].stem().wstring();
@@ -60,14 +60,18 @@ void Renderer::DrawScriptPanel(){
         if(selected)m_d2dContext->FillEllipse(D2D1::Ellipse(center,4*l.scale,4*l.scale),brush);
         text(name,r.left+29*l.scale,r.top+12*l.scale,brush);
     };
-    radio(l.benchmark,L"BENCHMARK",false,false);radio(l.livestream,L"FULL",true,m_scriptLogging==ScriptLogging::Full);radio(l.regression,L"REGRESSION",!m_recordTab,m_scriptLogging==ScriptLogging::Regression);
-    text(m_recordTab?L"Ctrl+R hides the panel / recording continues":L"Smooth replay / original timing / mouse wheel scrolls scripts",
+    radio(l.benchmark,L"BENCHMARK",!m_recordTab,m_scriptLogging==ScriptLogging::Benchmark);radio(l.livestream,L"FULL",true,m_scriptLogging==ScriptLogging::Full);radio(l.regression,L"REGRESSION",!m_recordTab,m_scriptLogging==ScriptLogging::Regression);
+    text(m_recordTab?L"Ctrl+R hides the panel / only button clicks capture views":L"Cold tile cache / FPS throughout / 10 s steady hold",
          l.panel.left+28*l.scale,l.panel.top+418*l.scale,m_scriptWhite.Get());
-    if(active){
-        wchar_t progress[160];
-        if(m_scriptOperation==ScriptOperation::Recording)swprintf_s(progress,L"RECORDING / %.1f s / %zu samples",double(m_scriptClock.Elapsed(ScriptNow()))/1.e6,m_cameraScript.samples.size());
-        else swprintf_s(progress,L"PLAYING / %.1f / %.1f s",double(m_scriptClock.Elapsed(ScriptNow()))/1.e6,double(m_cameraScript.durationUs)/1.e6);
-        text(progress,l.panel.left+28*l.scale,l.panel.top+470*l.scale,m_scriptWhite.Get());
+    if(m_scriptOperation==ScriptOperation::Recording){
+        button(l.snapshot,L"TAKE SNAPSHOT",false);
+        std::wstring progress=L"Captured views: "+std::to_wstring(m_cameraScript.views.size())+L" / "+m_scriptStatus;
+        text(progress.c_str(),l.panel.left+28*l.scale,l.panel.top+503*l.scale,m_scriptWhite.Get());
+    }else if(m_scriptOperation==ScriptOperation::Playing){
+        const auto phase=m_snapshotRun.State()==Core::SnapshotRun::Phase::Measuring?L"MEASURING":L"LOADING / WAITING FOR STABILITY";
+        auto progress=L"View "+std::to_wstring(m_currentView+1)+L" / "+std::to_wstring(m_cameraScript.views.size())+L" / "+phase;
+        text(progress.c_str(),l.panel.left+28*l.scale,l.panel.top+470*l.scale,m_scriptWhite.Get());
+        text(L"Panel visibility changes invalidate performance measurements.",l.panel.left+28*l.scale,l.panel.top+503*l.scale,m_scriptDisabled.Get());
     }else if(!m_scriptStatus.empty())text(m_scriptStatus.c_str(),l.panel.left+28*l.scale,l.panel.top+503*l.scale,m_scriptWhite.Get());
     const bool enabled=active||m_recordTab||!m_savedScripts.empty();
     button(l.action,active?(m_scriptOperation==ScriptOperation::Recording?L"STOP & SAVE":L"STOP SCRIPT"):(m_recordTab?L"START RECORDING":L"RUN SCRIPT"),m_scriptHover==0,enabled);
@@ -94,7 +98,8 @@ void Renderer::OnCharacter(wchar_t c){
 void Renderer::ScriptPanelClick(float x,float y){
     const auto l=Core::ScriptPanelLayout::Build(float(m_width),float(m_height));
     if(m_scriptOperation!=ScriptOperation::Idle){
-        if(l.action.Contains(x,y))StopLivestream("USER_STOP");
+        if(m_scriptOperation==ScriptOperation::Recording&&l.snapshot.Contains(x,y))TakeCameraSnapshot();
+        else if(l.action.Contains(x,y))StopLivestream("USER_STOP");
         return;
     }
     m_scriptNameFocused=false;
@@ -107,6 +112,7 @@ void Renderer::ScriptPanelClick(float x,float y){
             if(row<5&&m_scriptListOffset+row<m_savedScripts.size())m_selectedScript=m_scriptListOffset+row;
         }
     }else if(l.livestream.Contains(x,y))m_scriptLogging=ScriptLogging::Full;
+    else if(!m_recordTab&&l.benchmark.Contains(x,y))m_scriptLogging=ScriptLogging::Benchmark;
     else if(!m_recordTab&&l.regression.Contains(x,y))m_scriptLogging=ScriptLogging::Regression;
     else if(l.action.Contains(x,y)){if(m_recordTab)StartCameraRecording();else StartCameraPlayback();}
 }
@@ -114,64 +120,81 @@ Core::ScriptCamera Renderer::CurrentScriptCamera()const{return {m_yaw,m_pitch,m_
 void Renderer::ApplyScriptCamera(const Core::ScriptCamera& c){m_yaw=c.yaw;m_pitch=c.pitch;m_distanceKm=c.distanceKm;m_fov=c.fov;m_planet.frozen=c.frozen;}
 void Renderer::StartCameraRecording(){
     if(m_scriptName.find_first_not_of(L" ")==std::wstring::npos){m_scriptStatus=L"Enter a script name";return;}
+    if(m_planet.frozen){m_scriptStatus=L"Unfreeze LOD (Ctrl+L) before recording";return;}
     StartLivestream();if(!m_trace.Active())return;
     m_cameraScript={};m_cameraScript.width=m_width;m_cameraScript.height=m_height;
-    m_scriptClock={ScriptNow()};m_nextCameraSampleUs=10000;m_scriptOperation=ScriptOperation::Recording;
-    Core::CameraSample initial{0,CurrentScriptCamera(),false};
-    if(initial.camera.frozen){initial.frozenSelection=true;initial.leaves=m_planet.leaves;}
-    m_cameraScript.samples.push_back(std::move(initial));m_scriptNameFocused=false;
-    m_trace.Log([](auto& out){out<<"SCRIPT_RECORD_BEGIN format=1 logging=FULL sample_hz=100";});
+    m_scriptOperation=ScriptOperation::Recording;m_scriptNameFocused=false;
+    m_scriptStatus=L"No views yet";
+    m_trace.Log([](auto& out){out<<"SCRIPT_RECORD_BEGIN format=SNAPSHOTS capture=BUTTON";});
 }
-void Renderer::RecordCamera(bool force){
+void Renderer::TakeCameraSnapshot(){
     if(m_scriptOperation!=ScriptOperation::Recording)return;
-    const auto elapsed=m_scriptClock.Elapsed(ScriptNow());
-    if(!force&&elapsed<m_nextCameraSampleUs)return;
-    if(m_cameraScript.samples.size()>=999999||elapsed>24ull*60*60*1000000)return;
-    const auto state=CurrentScriptCamera();
-    Core::CameraSample sample{elapsed,state,false};
-    if(state.frozen&&!m_cameraScript.samples.back().camera.frozen){sample.frozenSelection=true;sample.leaves=m_planet.leaves;}
-    m_cameraScript.samples.push_back(std::move(sample));
-    // Sample real state on available render frames. Do not invent historical
-    // positions if a slow frame missed one or more 10-ms sampling intervals.
-    m_nextCameraSampleUs=(elapsed/10000+1)*10000;
+    const auto camera=CurrentScriptCamera();
+    if(camera.frozen){m_scriptStatus=L"Unfreeze LOD (Ctrl+L) to capture";return;}
+    if(!camera.Valid()||m_cameraScript.views.size()>=4096){m_scriptStatus=L"Invalid camera or snapshot limit reached";return;}
+    m_cameraScript.views.push_back(camera);m_scriptStatus=L"Snapshot "+std::to_wstring(m_cameraScript.views.size())+L" captured";
+    m_trace.Log([&](auto& out){out<<"SCRIPT_SNAPSHOT index="<<m_cameraScript.views.size()-1<<" yaw="<<camera.yaw<<" pitch="<<camera.pitch<<" distance_km="<<camera.distanceKm<<" fov="<<camera.fov;});
 }
 void Renderer::StartCameraPlayback(){
     if(m_selectedScript>=m_savedScripts.size())return;
     Core::CameraScript script;std::string error;
-    if(!Core::CameraScript::Load(m_savedScripts[m_selectedScript],script,error)){SetError(error);m_scriptStatus=L"Cannot load selected script / see OrbitX.log";return;}
-    if(script.width!=m_width||script.height!=m_height){m_scriptStatus=L"Match the recorded viewport: "+std::to_wstring(script.width)+L" x "+std::to_wstring(script.height);return;}
+    if(!Core::CameraScript::Load(m_savedScripts[m_selectedScript],script,error)){SetError(error);m_scriptStatus=L"Cannot load script / recreate old paths with TAKE SNAPSHOT";return;}
+    if(script.width!=m_width||script.height!=m_height){m_scriptStatus=L"Match recorded viewport: "+std::to_wstring(script.width)+L" x "+std::to_wstring(script.height);return;}
     OnMouseUp();m_savedCamera=CurrentScriptCamera();m_savedOverlay=m_tileOverlay;m_savedGraph=m_showFrameGraph;
     m_savedFrozenLeaves=m_planet.leaves;m_savedFrozenRequests=m_planet.requests;m_savedFrozenDependencies=m_planet.dependencies;
     if(m_scriptLogging==ScriptLogging::Regression){
-        m_regressionViews=Core::RegressionViews(script);
-        if(m_regressionViews.empty()){m_scriptStatus=L"Regression needs stationary pauses longer than 4 seconds";return;}
 #ifdef PLANET_DEBUG_MODE
         constexpr bool illuminated=true;
 #else
         constexpr bool illuminated=false;
 #endif
-        if(!m_regressionLog.Start(std::filesystem::path(m_root)/L"Logs",script,m_regressionViews.size(),illuminated)){
+        if(!m_regressionLog.Start(std::filesystem::path(m_root)/L"Logs",script,script.views.size(),illuminated,m_tileOverlay,m_showFrameGraph,m_vsync)){
             SetError(m_regressionLog.Error());m_scriptStatus=L"Cannot open regression log";return;
         }
-        m_regressionSession=true;m_nextRegressionView=0;m_regressionElapsed=0;m_regressionStableChecks=0;
-        m_regressionCheckUs=m_regressionViews.front().timeUs-400000;m_previousRegressionSnapshot={};
-        m_tileOverlay=false;m_showFrameGraph=false;m_telemetryText.clear();m_scriptPanelOpen=false;m_scriptHover=-1;
-    }else{StartLivestream();if(!m_trace.Active())return;}
-    m_cameraScript=std::move(script);m_nextSample=0;m_scriptClock={ScriptNow()};m_nextCameraSampleUs=10000;m_scriptOperation=ScriptOperation::Playing;
-    m_trace.Log([&](auto& out){out<<"SCRIPT_RUN_BEGIN logging=FULL timing=RECORDED interpolation=LINEAR file=\""<<Core::EnvironmentTrace::Escape(m_savedScripts[m_selectedScript].filename().string())<<"\" cache_policy=EXISTING entries="<<m_tiles.size();});
+        m_regressionSession=true;
+    }else if(m_scriptLogging==ScriptLogging::Full){StartLivestream();if(!m_trace.Active())return;}
+    else{m_tileOverlay=false;m_showFrameGraph=false;m_telemetryText.clear();}
+    m_runOverlay=m_tileOverlay;m_runGraph=m_showFrameGraph;m_runVsync=m_vsync;
+    m_cameraScript=std::move(script);m_currentView=0;m_beginSnapshot=true;m_snapshotResults.clear();m_snapshotResults.reserve(m_cameraScript.views.size());m_runInvalid=false;
+    m_scriptFrames.Begin(ScriptNow());
+    m_scriptOperation=ScriptOperation::Playing;m_scriptPanelOpen=false;m_scriptHover=-1;
+    m_trace.Log([&](auto& out){out<<"SCRIPT_RUN_BEGIN format=SNAPSHOTS views="<<m_cameraScript.views.size()<<" cache_policy=ROOT_ONLY steady_us="<<Core::SnapshotSteadyUs<<" hold_us="<<Core::SnapshotHoldUs;});
+}
+bool Renderer::ResetScriptCache(){
+    m_tileLoader.Reset();m_deferredTile.reset();
+    // Both queues must finish before textures or descriptor slots are recycled.
+    const auto drawFence=++m_nextFenceValue;
+    if(FAILED(m_queue->Signal(m_fence.Get(),drawFence))){SetError("Script cache draw fence signal failed");return false;}
+    if(m_fence->GetCompletedValue()<drawFence){
+        if(FAILED(m_fence->SetEventOnCompletion(drawFence,m_fenceEvent))||WaitForSingleObject(m_fenceEvent,INFINITE)!=WAIT_OBJECT_0){SetError("Script cache draw wait failed");return false;}
+    }
+    if(m_uploadFence->GetCompletedValue()<m_uploadFenceValue){
+        if(FAILED(m_uploadFence->SetEventOnCompletion(m_uploadFenceValue,m_fenceEvent))||WaitForSingleObject(m_fenceEvent,INFINITE)!=WAIT_OBJECT_0){SetError("Script cache upload wait failed");return false;}
+    }
+    CollectPlanetUploads();
+    for(auto it=m_tiles.begin();it!=m_tiles.end();){
+        if(it->first.level==4){++it;continue;}
+        const auto id=it->first;
+        m_trace.Log([&](auto& out){out<<"TILE_EVICT tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=SCRIPT_CACHE_RESET slot="<<it->second.slot<<" bytes="<<it->second.bytes
+            <<" last_draw_fence="<<it->second.lastDrawFence<<" draw_fence_completed="<<m_fence->GetCompletedValue()<<" upload_fence="<<it->second.uploadFence;});
+        m_tileBytes-=it->second.bytes;it=m_tiles.erase(it);
+    }
+    m_failedTiles.clear();m_tileDraws.clear();m_planet.leaves.clear();m_planet.requests.clear();m_planet.dependencies.clear();
+    for(auto& batch:m_uploadBatches){batch.tiles.clear();batch.used=0;}
+    m_tileStatus.clear();m_telemetryText.clear();
+    return true;
 }
 void Renderer::UpdateScriptPlayback(){
     if(m_cameraScript.width!=m_width||m_cameraScript.height!=m_height){StopLivestream("VIEWPORT_CHANGED");return;}
-    const auto elapsed=m_scriptClock.Elapsed(ScriptNow());m_regressionElapsed=elapsed;bool applied=false;
-    while(m_nextSample<m_cameraScript.samples.size()&&m_cameraScript.samples[m_nextSample].timeUs<=elapsed){
-        const auto& sample=m_cameraScript.samples[m_nextSample++];ApplyScriptCamera(sample.camera);applied=true;
-        if(sample.frozenSelection){m_planet.leaves=sample.leaves;m_planet.requests.clear();m_planet.dependencies.clear();}
-    }
-    if(m_nextSample>0&&m_nextSample<m_cameraScript.samples.size())
-        ApplyScriptCamera(Core::InterpolateCamera(m_cameraScript.samples[m_nextSample-1],m_cameraScript.samples[m_nextSample],elapsed));
-    TraceCamera("SCRIPT_CAMERA");
-    // Render the final recorded view once before completion and restoration.
-    if(!applied&&m_nextSample==m_cameraScript.samples.size()&&elapsed>=m_cameraScript.durationUs)StopLivestream("SCRIPT_COMPLETE");
+    m_resetThisFrame=false;
+    if(!m_beginSnapshot)return;
+    if(m_currentView>=m_cameraScript.views.size()){StopLivestream("SCRIPT_COMPLETE");return;}
+    m_resetThisFrame=true;
+    if(!ResetScriptCache()){StopLivestream("CACHE_RESET_FAILED");return;}
+    // Reset/drain work is deliberately outside this view's loading timer.
+    const auto now=ScriptNow();m_snapshotRun.Begin(now);ApplyScriptCamera(m_cameraScript.views[m_currentView]);
+    m_nextSnapshotCheckUs=now;m_haveSnapshot=false;m_snapshotReady=false;m_snapshotChanged=false;m_beginSnapshot=false;
+    m_trace.Log([&](auto& out){out<<"SCRIPT_VIEW_BEGIN index="<<m_currentView;});TraceCamera("SCRIPT_CAMERA");
 }
 Core::RegressionSnapshot Renderer::RegressionSnapshot()const{
     Core::RegressionSnapshot snapshot;snapshot.camera=CurrentScriptCamera();snapshot.leaves=m_planet.leaves;
@@ -188,10 +211,22 @@ Core::RegressionSnapshot Renderer::RegressionSnapshot()const{
     return snapshot;
 }
 void Renderer::CaptureRegression(){
-    if(m_nextRegressionView>=m_regressionViews.size()||m_regressionElapsed<m_regressionCheckUs)return;
-    const auto& view=m_regressionViews[m_nextRegressionView];
+    const auto now=ScriptNow();m_snapshotChanged=false;
+    if(m_tileOverlay!=m_runOverlay||m_showFrameGraph!=m_runGraph||m_vsync!=m_runVsync||m_scriptPanelOpen)m_runInvalid=true;
+    if(now<m_nextSnapshotCheckUs||(m_scriptLogging==ScriptLogging::Benchmark&&m_snapshotRun.State()==Core::SnapshotRun::Phase::Measuring)){
+        // Cheap continuous coverage checks between the 10-Hz full integrity checks.
+        if(!m_planet.requests.empty())m_snapshotReady=false;
+        if(m_haveSnapshot){
+            if(m_planet.leaves!=m_previousRegressionSnapshot.leaves||m_tileDraws.size()!=m_previousRegressionSnapshot.draws.size())m_snapshotChanged=true;
+            else for(size_t i=0;i<m_tileDraws.size();++i){const auto& a=m_tileDraws[i];const auto& b=m_previousRegressionSnapshot.draws[i];
+                if(a.id!=b.id||a.source!=b.source||a.grid!=b.grid||!std::equal(std::begin(a.uv),std::end(a.uv),b.uv.begin())){m_snapshotChanged=true;break;}
+            }
+        }
+        return;
+    }
+    m_nextSnapshotCheckUs=now+Core::SnapshotBucketUs;
     auto snapshot=RegressionSnapshot();const char* status="READY";
-    if(m_regressionElapsed>view.endUs||snapshot.camera!=view.camera)status="MISSED";
+    if(snapshot.camera!=m_cameraScript.views[m_currentView])status="CAMERA_CHANGED";
     else if(!m_planet.requests.empty())status="PENDING";
     else if(snapshot.leaves.empty()||snapshot.leaves.size()!=snapshot.draws.size())status="COVERAGE_INVALID";
     else{
@@ -202,24 +237,29 @@ void Renderer::CaptureRegression(){
         std::set<Core::TileId> selected(snapshot.leaves.begin(),snapshot.leaves.end()),drawn;
         if(selected.size()!=snapshot.leaves.size())status="COVERAGE_INVALID";
         for(const auto& draw:m_tileDraws){
-            auto source=m_tiles.find(draw.source);
+            const auto source=m_tiles.find(draw.source);
             if(!selected.contains(draw.id)||!drawn.insert(draw.id).second||draw.grid>=m_patchMeshes.size())status="COVERAGE_INVALID";
             else if(source==m_tiles.end()||!source->second.ready)status="PENDING";
             else if(source->second.slot!=draw.slot)status="BINDING_INVALID";
             else if(draw.id!=draw.source&&m_planet.files.contains(draw.id))status="FALLBACK_PENDING";
         }
     }
-    const bool consecutive=m_regressionElapsed-m_regressionCheckUs<100000;
-    if(std::string(status)=="READY"&&consecutive){
-        if(snapshot==m_previousRegressionSnapshot)++m_regressionStableChecks;
-        else m_regressionStableChecks=1;
-    }else m_regressionStableChecks=0;
-    m_previousRegressionSnapshot=snapshot;
-    if(m_regressionElapsed<view.timeUs){m_regressionCheckUs+=100000;return;}
-    if(std::string(status)=="READY"&&m_regressionStableChecks<4)status="UNSETTLED";
-    m_regressionLog.View(m_nextRegressionView,view,std::move(snapshot),status);
-    ++m_nextRegressionView;m_regressionStableChecks=0;m_previousRegressionSnapshot={};
-    if(m_nextRegressionView<m_regressionViews.size())m_regressionCheckUs=m_regressionViews[m_nextRegressionView].timeUs-400000;
+    m_snapshotChanged=!m_haveSnapshot||snapshot!=m_previousRegressionSnapshot;
+    m_snapshotReady=std::string(status)=="READY";
+    if(m_tileOverlay!=m_runOverlay||m_showFrameGraph!=m_runGraph||m_vsync!=m_runVsync||m_scriptPanelOpen)m_runInvalid=true;
+    m_previousRegressionSnapshot=std::move(snapshot);m_haveSnapshot=true;
+}
+void Renderer::CompleteScriptFrame(){
+    const auto now=ScriptNow();const auto before=m_snapshotRun.State();
+    m_scriptFrames.Frame(now,m_currentView,m_resetThisFrame?"RESET_LOADING":before==Core::SnapshotRun::Phase::Measuring?"MEASURING":"LOADING");
+    m_snapshotRun.Observe(now,m_snapshotReady,m_snapshotChanged);
+    if(before!=m_snapshotRun.State()&&m_snapshotRun.State()==Core::SnapshotRun::Phase::Measuring)
+        m_trace.Log([&](auto& out){out<<"SCRIPT_STEADY index="<<m_currentView<<" loading_us="<<m_snapshotRun.Result().loadingUs;});
+    if(m_snapshotRun.State()!=Core::SnapshotRun::Phase::Done)return;
+    auto result=m_snapshotRun.Result();if(m_runInvalid&&result.status=="READY")result.status="SETTINGS_CHANGED";
+    if(m_regressionSession)m_regressionLog.View(m_currentView,Core::SnapshotRegressionView(m_currentView,m_cameraScript.views[m_currentView]),m_previousRegressionSnapshot,result.status.c_str());
+    m_trace.Log([&](auto& out){out<<"SCRIPT_VIEW_END index="<<m_currentView<<" status="<<result.status<<" loading_us="<<result.loadingUs<<" measurement_us="<<result.measurementUs<<" frames="<<result.frames;});
+    m_snapshotResults.push_back(std::move(result));++m_currentView;m_beginSnapshot=true;
 }
 void Renderer::FinishCameraScript(const char* reason){
     const auto operation=m_scriptOperation;m_scriptOperation=ScriptOperation::Idle;
@@ -233,16 +273,12 @@ void Renderer::FinishCameraScript(const char* reason){
     }else if(operation==ScriptOperation::Playing){
         ApplyScriptCamera(m_savedCamera);
         if(m_savedCamera.frozen){m_planet.leaves=std::move(m_savedFrozenLeaves);m_planet.requests=std::move(m_savedFrozenRequests);m_planet.dependencies=std::move(m_savedFrozenDependencies);}
-        m_tileOverlay=m_savedOverlay;m_showFrameGraph=m_savedGraph;m_telemetryText.clear();
+        if(m_scriptLogging==ScriptLogging::Benchmark){m_tileOverlay=m_savedOverlay;m_showFrameGraph=m_savedGraph;}m_telemetryText.clear();
         const std::string why=reason;m_scriptStatus=why=="SCRIPT_COMPLETE"?L"Playback complete / original view restored":L"Playback stopped / original view restored";
         if(why=="VIEWPORT_CHANGED")m_scriptStatus=L"Viewport changed / playback stopped";
     }
 }
 void Renderer::TraceCamera(const char* event){
-    // LOD freeze changes are discrete commands; capture their exact input time
-    // in addition to the 100-Hz camera samples.
-    if(m_scriptOperation==ScriptOperation::Recording&&!m_cameraScript.samples.empty()
-       &&m_planet.frozen!=m_cameraScript.samples.back().camera.frozen)RecordCamera(true);
     if(!m_trace.Active())return;
     const std::array<double,11> state={double(m_yaw),double(m_pitch),double(m_distanceKm),double(m_fov),double(m_width),double(m_height),double(m_tileOverlay),double(m_showFrameGraph),double(m_planet.frozen),double(m_vsync),double(m_scriptPanelOpen)};
     const bool changed=m_traceCameraStates.Update(0,state);
@@ -314,31 +350,35 @@ void Renderer::StartLivestream(){
     TraceFrameSnapshot();
 }
 void Renderer::StopLivestream(const char* reason){
+    const bool playing=m_scriptOperation==ScriptOperation::Playing;
+    const bool complete=std::string(reason)=="SCRIPT_COMPLETE";
+    std::filesystem::path performancePath;std::string performanceError;
+    if(playing){
+        if(!complete&&!m_beginSnapshot){auto partial=m_snapshotRun.Result();partial.status="CANCELLED";m_snapshotResults.push_back(std::move(partial));}
+        m_scriptFrames.Finish(ScriptNow());
+        const char* mode=m_scriptLogging==ScriptLogging::Benchmark?"BENCHMARK":m_scriptLogging==ScriptLogging::Regression?"REGRESSION":"FULL";
+        Core::SaveSnapshotPerformance(std::filesystem::path(m_root)/L"Logs",m_cameraScript,m_snapshotResults,m_scriptFrames.Buckets(),mode,m_runOverlay,m_runGraph,m_runVsync,reason,performancePath,performanceError);
+    }
     if(m_regressionSession){
-        const bool complete=std::string(reason)=="SCRIPT_COMPLETE";
-        if(complete)for(;m_nextRegressionView<m_regressionViews.size();++m_nextRegressionView)m_regressionLog.Missing(m_nextRegressionView,m_regressionViews[m_nextRegressionView]);
-        m_regressionLog.Stop(complete?m_cameraScript.durationUs:m_regressionElapsed,reason);
+        for(size_t i=m_currentView;i<m_cameraScript.views.size();++i)m_regressionLog.Missing(i,Core::SnapshotRegressionView(i,m_cameraScript.views[i]));
+        m_regressionLog.Stop(m_cameraScript.views.size()*Core::SnapshotHoldUs,reason);
         const bool valid=complete&&!m_regressionLog.Incomplete()&&m_regressionLog.Error().empty();
         m_regressionSession=false;FinishCameraScript(reason);m_scriptPanelOpen=false;m_scriptHover=-1;
-        m_scriptStatus=m_regressionLog.Path().filename().wstring()+(valid?L" / COMPLETE / compare with baseline":L" / INVALID / inspect before comparing");
-        if(!m_regressionLog.Error().empty())SetError(m_regressionLog.Error());return;
+        m_scriptStatus=m_regressionLog.Path().filename().wstring()+(valid?L" / COMPLETE / compare baseline":L" / INVALID / inspect before comparing");
+        if(!m_regressionLog.Error().empty())SetError(m_regressionLog.Error());
+    }else{
+        if(m_trace.Active()){
+            TraceCamera("FINAL_CAMERA");TraceFrameSnapshot();
+            for(const auto& [id,tile]:m_tiles)m_trace.Log([&](auto& out){out<<"FINAL_TILE tile="<<id.level<<"/"<<id.row<<"/"<<id.column
+                <<" ready="<<tile.ready<<" slot="<<tile.slot<<" touched="<<tile.touched<<" upload_fence="<<tile.uploadFence<<" last_draw_fence="<<tile.lastDrawFence;});
+        }
+        if(m_scriptOperation!=ScriptOperation::Idle)m_trace.Log([&](auto& out){out<<"SCRIPT_END reason="<<reason<<" views="<<m_cameraScript.views.size();});
+        if(playing){FinishCameraScript(reason);TraceCamera("SCRIPT_CAMERA_RESTORED");}
+        m_trace.Stop(reason);m_scriptPanelOpen=false;m_scriptHover=-1;m_traceSession=false;
+        if(m_scriptOperation==ScriptOperation::Recording)FinishCameraScript(reason);
+        if(!m_trace.Error().empty())SetError(m_trace.Error());
     }
-    if(m_scriptOperation==ScriptOperation::Recording){
-        const auto state=CurrentScriptCamera();const auto elapsed=std::min<uint64_t>(m_scriptClock.Elapsed(ScriptNow()),24ull*60*60*1000000);
-        m_cameraScript.durationUs=elapsed;
-        if(m_cameraScript.samples.size()<1000000)m_cameraScript.samples.push_back({elapsed,state,false});
-    }
-    if(m_trace.Active()){
-        TraceCamera("FINAL_CAMERA");TraceFrameSnapshot();
-        for(const auto& [id,tile]:m_tiles)m_trace.Log([&](auto& out){out<<"FINAL_TILE tile="<<id.level<<"/"<<id.row<<"/"<<id.column
-            <<" ready="<<tile.ready<<" slot="<<tile.slot<<" touched="<<tile.touched
-            <<" upload_fence="<<tile.uploadFence<<" last_draw_fence="<<tile.lastDrawFence;});
-    }
-    if(m_scriptOperation!=ScriptOperation::Idle)m_trace.Log([&](auto& out){out<<"SCRIPT_END reason="<<reason<<" samples="<<m_cameraScript.samples.size()<<" duration_us="<<m_cameraScript.durationUs;});
-    if(m_scriptOperation==ScriptOperation::Playing){FinishCameraScript(reason);TraceCamera("SCRIPT_CAMERA_RESTORED");}
-    m_trace.Stop(reason);m_scriptPanelOpen=false;m_scriptHover=-1;
-    m_traceSession=false;
-    if(m_scriptOperation==ScriptOperation::Recording)FinishCameraScript(reason);
-    if(!m_trace.Error().empty())SetError(m_trace.Error());
+    if(!performanceError.empty()){SetError(performanceError);m_scriptStatus+=L" / performance write failed";}
+    else if(playing)m_scriptStatus+=L" / "+performancePath.filename().wstring();
 }
 }

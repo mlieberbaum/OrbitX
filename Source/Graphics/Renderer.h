@@ -22,7 +22,7 @@
 #include "../Core/FrameRateHistory.h"
 #include "../Core/EnvironmentTrace.h"
 #include "../Core/CameraScript.h"
-#include "../Core/RegressionLog.h"
+#include "../Core/SnapshotRun.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -67,35 +67,40 @@ private:
     void ScriptPanelClick(float x,float y);
     void StartCameraRecording();
     void StartCameraPlayback();
-    void RecordCamera(bool force=false);
+    void TakeCameraSnapshot();
+    bool ResetScriptCache();
+    void CompleteScriptFrame();
     void UpdateScriptPlayback();
     void CaptureRegression();
     Core::RegressionSnapshot RegressionSnapshot()const;
-    enum class ScriptLogging { Full, Regression };
+    enum class ScriptLogging { Benchmark, Full, Regression };
     ScriptLogging m_scriptLogging=ScriptLogging::Full;
     Core::RegressionLog m_regressionLog;
     bool m_regressionSession=false;
-    std::vector<Core::RegressionView> m_regressionViews;
-    size_t m_nextRegressionView=0;
-    uint64_t m_regressionElapsed=0,m_regressionCheckUs=0;
-    unsigned m_regressionStableChecks=0;
+    Core::SnapshotRun m_snapshotRun;
+    Core::ScriptFrameRecorder m_scriptFrames;
+    bool m_resetThisFrame=false;
+    std::vector<Core::SnapshotResult> m_snapshotResults;
+    size_t m_currentView=0;
+    bool m_beginSnapshot=true,m_snapshotReady=false,m_snapshotChanged=false,m_haveSnapshot=false;
+    uint64_t m_nextSnapshotCheckUs=0;
     Core::RegressionSnapshot m_previousRegressionSnapshot;
+    bool m_runInvalid=false;
+    bool m_runOverlay=false,m_runGraph=false,m_runVsync=false;
     void ApplyScriptCamera(const Core::ScriptCamera& camera);
     Core::ScriptCamera CurrentScriptCamera() const;
     void FinishCameraScript(const char* reason);
     enum class ScriptOperation { Idle, Recording, Playing };
     ScriptOperation m_scriptOperation=ScriptOperation::Idle;
     bool m_recordTab=true,m_scriptNameFocused=false;
-    std::wstring m_scriptName=L"Camera_Path";
+    std::wstring m_scriptName=L"Camera_Views";
     std::vector<std::filesystem::path> m_savedScripts;
-    size_t m_selectedScript=0,m_scriptListOffset=0,m_nextSample=0;
+    size_t m_selectedScript=0,m_scriptListOffset=0;
     Core::CameraScript m_cameraScript;
     Core::ScriptCamera m_savedCamera;
     std::vector<Core::TileId> m_savedFrozenLeaves,m_savedFrozenRequests;
     std::set<Core::TileId> m_savedFrozenDependencies;
     bool m_savedOverlay=false,m_savedGraph=false;
-    Core::ScriptClock m_scriptClock;
-    uint64_t m_nextCameraSampleUs=10000;
     void StartLivestream();
     void StopLivestream(const char* reason);
     void TraceCamera(const char* event);
