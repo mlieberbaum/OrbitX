@@ -22,6 +22,7 @@
 #include "../Core/FrameRateHistory.h"
 #include "../Core/EnvironmentTrace.h"
 #include "../Core/CameraScript.h"
+#include "../Core/RegressionLog.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -68,6 +69,17 @@ private:
     void StartCameraPlayback();
     void RecordCamera(bool force=false);
     void UpdateScriptPlayback();
+    void CaptureRegression();
+    Core::RegressionSnapshot RegressionSnapshot()const;
+    enum class ScriptLogging { Full, Regression };
+    ScriptLogging m_scriptLogging=ScriptLogging::Full;
+    Core::RegressionLog m_regressionLog;
+    bool m_regressionSession=false;
+    std::vector<Core::RegressionView> m_regressionViews;
+    size_t m_nextRegressionView=0;
+    uint64_t m_regressionElapsed=0,m_regressionCheckUs=0;
+    unsigned m_regressionStableChecks=0;
+    Core::RegressionSnapshot m_previousRegressionSnapshot;
     void ApplyScriptCamera(const Core::ScriptCamera& camera);
     Core::ScriptCamera CurrentScriptCamera() const;
     void FinishCameraScript(const char* reason);

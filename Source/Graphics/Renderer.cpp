@@ -620,7 +620,7 @@ void Renderer::DrawHudText(){
 
 void Renderer::Update(float){} // Scene constants are written once in Render().
 void Renderer::Render(){
- if(m_traceSession&&!m_trace.Active())StopLivestream("LOG_IO_FAILURE");
+ if((m_traceSession&&!m_trace.Active())||(m_regressionSession&&!m_regressionLog.Active()))StopLivestream("LOG_IO_FAILURE");
  ++m_traceFrame;
  if(m_trace.Active())m_trace.SetFrame(m_traceFrame);
  if(m_scriptOperation==ScriptOperation::Recording){
@@ -639,6 +639,7 @@ void Renderer::Render(){
  ++m_fpsFrames;
  if(m_appState==AppState::Simulation && !UpdatePlanet()) return;
  UpdateCB();
+ if(m_regressionSession)CaptureRegression();
  if(m_trace.Active()){
    TraceFrameSnapshot();
    SceneCB scene{};memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));
@@ -750,8 +751,8 @@ void Renderer::OnKeyDown(WPARAM k){
  m_trace.Log([&](auto& out){out<<"INPUT_KEY key="<<k<<" ctrl="<<bool(GetKeyState(VK_CONTROL)&0x8000);});
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
    if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;m_scriptNameFocused=false;if(m_scriptPanelOpen&&m_scriptOperation==ScriptOperation::Idle)RefreshScripts();TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
-   if(k=='F'){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
-   if(k=='O'){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
+   if(k=='F'&&!m_regressionSession){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
+   if(k=='O'&&!m_regressionSession){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
    if(k=='L'&&m_scriptOperation!=ScriptOperation::Playing){m_planet.frozen=!m_planet.frozen;TraceCamera("LOD_FREEZE_TOGGLE");return;}
  }
  if(k==VK_ESCAPE){

@@ -200,8 +200,12 @@ historical positions. Sampling is an approximation of the camera between samples
 not an identical recording of every rendered frame.
 
 Logging options are **Benchmark**, **Full**, and **Regression**. Full is the
-existing livestream diagnostic trace; Benchmark and Regression remain disabled.
+existing livestream diagnostic trace. Regression is available for saved-script
+playback on the Run tab; Benchmark remains disabled.
 Full mode leaves overlays and the FPS graph active according to user settings.
+Regression saves those states, disables both during playback, and restores them
+on completion/cancellation/failure. Ctrl+O/Ctrl+F changes are ignored during a
+regression run.
 Playback temporarily owns camera/LOD controls. Ctrl+R can show or hide the panel
 without pausing playback; **STOP SCRIPT** cancels and closes the panel. Completion,
 cancellation, log failure and scenario exit restore the pre-run camera,
@@ -225,7 +229,7 @@ Playback uses the **existing cache**, recorded in the Full log. It reproduces
 camera commands, not the asynchronous read/upload schedule. For comparable cold
 runs, restart OrbitX and use the same scenario, viewport, build and texture set;
 warm replay intentionally benefits from already-cached tiles. Automated
-regression comparison and benchmark measurements will be added separately.
+baseline comparison and benchmark measurements will be added separately.
 
 Logs are written to **OrbitX/Runtime/Logs**, using the Visual Studio Runtime working
 directory, e.g. `Livestream_2026-10-10_210445_123456.log`. Filenames use recording
@@ -277,3 +281,49 @@ real DDS streaming require local verification.
 All four Visual Studio configurations enable **Multi-processor Compilation**
 (`/MP`) for parallel C++ compilation. This changes build scheduling only; it does
 not add game/render threads or alter runtime behavior.
+
+## Canonical regression logs
+
+Select a saved script on the Run tab, select **Regression**, then **RUN SCRIPT**.
+Logs are `Runtime/Logs/Regression_1.log`, `Regression_2.log`, etc., without
+system-time filenames or timestamps. Existing logs are never overwritten.
+Every record uses **elapsed script microseconds**. Completed-run end time and
+capture times come from the saved script, not the frame number or wall clock.
+The UTF-8/ASCII-compatible text has LF newlines and classic-locale round-trip
+float precision, so Beyond Compare can compare the complete files byte-for-byte.
+
+The capture policy finds unchanged camera runs of at least **1 second** and
+samples coverage **100 ms before each pause ends**. It does not add checkpoints,
+move/hold the camera, change playback speed, or wait for loading. Five observations
+at 100-ms intervals near each capture test stability; at least four consecutive
+ready, identical camera/scene/selection/draw snapshots are required. The current
+Moon_Camera_Path_Regression_1 script yields **15** comparison views.
+
+Only the deterministic drawing inputs/results are recorded: script signature,
+viewport/body/illumination mode, camera, actual scene matrices/sun direction,
+selected tile IDs and draw tile/source IDs, mesh grid/index count and UV mapping.
+Tile records are sorted. Source readiness, descriptor-to-source correspondence,
+selection/draw coverage, dependency readiness and fallback status are checked.
+Wall timestamps, build dates, script filename/path, render frame numbers, FPS,
+GPU fences/physical slots, cache population/LRU order, worker timings, loading
+and eviction sequence are excluded. The Full trace remains unchanged and is the
+appropriate mode for diagnosing transient loading/eviction behavior.
+
+A healthy run ends with **RESULT status=COMPLETE** and zero incomplete views.
+Pending loading, active fallback, DDS failures, invalid coverage/bindings,
+unsettled snapshots, missed capture windows, cancellation and log errors make
+it **INVALID**. Two identical INVALID files are not a passing comparison. If a
+view is incomplete, re-record a longer pause or fix its loading problem; replay
+will never extend the recording automatically. Capture windows missed because
+of long stalls also invalidate the run.
+
+To establish a baseline, restart OrbitX, use the same scenario, texture collection,
+viewport and illumination configuration, run the approved camera path in
+Regression, verify COMPLETE, and retain that log. Repeat after a change and compare
+against the baseline. Changes in GPU slot allocation or asynchronous read order
+should not affect a fully settled comparison. A differing or INVALID log needs
+inspection. These snapshots verify stable CPU selection and submitted draw inputs;
+they do not compare every transient frame, texture file contents or rendered pixels.
+`Source/Tests/RegressionLogTests.cpp` verifies canonical byte equality, detected
+changes to source/UV/grid/matrices, planned capture times, incomplete-result
+handling and file-error recovery. Windows/DX12 end-to-end verification is local.
