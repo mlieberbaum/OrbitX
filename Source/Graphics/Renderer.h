@@ -66,15 +66,14 @@ private:
     void ScriptPanelClick(float x,float y);
     void StartCameraRecording();
     void StartCameraPlayback();
-    void RecordCamera(bool checkpoint=false);
+    void RecordCamera(bool force=false);
     void UpdateScriptPlayback();
-    void CheckScriptCheckpoint();
     void ApplyScriptCamera(const Core::ScriptCamera& camera);
     Core::ScriptCamera CurrentScriptCamera() const;
     void FinishCameraScript(const char* reason);
     enum class ScriptOperation { Idle, Recording, Playing };
     ScriptOperation m_scriptOperation=ScriptOperation::Idle;
-    bool m_recordTab=true,m_scriptNameFocused=false,m_waitCheckpoints=false;
+    bool m_recordTab=true,m_scriptNameFocused=false;
     std::wstring m_scriptName=L"Camera_Path";
     std::vector<std::filesystem::path> m_savedScripts;
     size_t m_selectedScript=0,m_scriptListOffset=0,m_nextSample=0;
@@ -84,9 +83,7 @@ private:
     std::set<Core::TileId> m_savedFrozenDependencies;
     bool m_savedOverlay=false,m_savedGraph=false;
     Core::ScriptClock m_scriptClock;
-    std::chrono::steady_clock::time_point m_checkpointStableSince{};
-    uint64_t m_checkpointWaitStart=0;
-    bool m_checkpointTimedOut=false;
+    uint64_t m_nextCameraSampleUs=10000;
     void StartLivestream();
     void StopLivestream(const char* reason);
     void TraceCamera(const char* event);
@@ -160,7 +157,6 @@ private:
     std::map<Core::TileId,TileResource> m_tiles;
     std::set<Core::TileId> m_failedTiles;
     std::vector<TileDraw> m_tileDraws;
-    std::vector<TileDraw> m_checkpointDraws;
     std::set<Core::TileId> m_traceDrawIds,m_traceRequestIds;
     Core::TraceStateCache<Core::TileId,TileDraw> m_traceDrawStates;
     Core::TraceStateCache<int,std::array<double,11>> m_traceCameraStates;

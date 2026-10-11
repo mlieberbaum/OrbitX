@@ -42,7 +42,7 @@ void Renderer::DrawScriptPanel(){
         auto name=m_scriptName+(m_scriptNameFocused?L"_":L"");
         text(name.c_str(),l.script.left+16*l.scale,l.script.top+46*l.scale,m_scriptGreen.Get());
         text(L"Click to name / letters, numbers, spaces, - and _",l.script.left+16*l.scale,l.script.top+94*l.scale,m_scriptDisabled.Get());
-        text(L"Record the camera path; add checkpoints while recording.",l.script.left+16*l.scale,l.script.top+122*l.scale,m_scriptWhite.Get());
+        text(L"Camera path sampled at 100 Hz / pauses are recorded too.",l.script.left+16*l.scale,l.script.top+122*l.scale,m_scriptWhite.Get());
     }else{
         if(m_savedScripts.empty())text(L"No saved scripts / record a camera path first",l.script.left+16*l.scale,l.script.top+16*l.scale,m_scriptDisabled.Get());
         for(size_t row=0;row<5&&m_scriptListOffset+row<m_savedScripts.size();++row){
@@ -60,19 +60,13 @@ void Renderer::DrawScriptPanel(){
         text(name,r.left+29*l.scale,r.top+12*l.scale,brush);
     };
     radio(l.benchmark,L"BENCHMARK",false);radio(l.livestream,L"FULL",true);radio(l.regression,L"REGRESSION",false);
-    if(!m_recordTab){
-        text(L"PLAYBACK TIMING / mouse wheel scrolls scripts",l.panel.left+28*l.scale,l.panel.top+410*l.scale,m_scriptWhite.Get());
-        button(l.recordedTiming,L"RECORDED TIMING",!m_waitCheckpoints,!active);
-        button(l.checkpointTiming,L"WAIT AT CHECKPOINTS",m_waitCheckpoints,!active);
-    }else{
-        text(L"Ctrl+R hides the panel / recording continues",l.panel.left+28*l.scale,l.panel.top+418*l.scale,m_scriptWhite.Get());
-    }
+    text(m_recordTab?L"Ctrl+R hides the panel / recording continues":L"Smooth replay / original timing / mouse wheel scrolls scripts",
+         l.panel.left+28*l.scale,l.panel.top+418*l.scale,m_scriptWhite.Get());
     if(active){
         wchar_t progress[160];
         if(m_scriptOperation==ScriptOperation::Recording)swprintf_s(progress,L"RECORDING / %.1f s / %zu samples",double(m_scriptClock.Elapsed(ScriptNow()))/1.e6,m_cameraScript.samples.size());
-        else swprintf_s(progress,L"PLAYING / %.1f / %.1f s%s",double(m_scriptClock.Elapsed(ScriptNow()))/1.e6,double(m_cameraScript.durationUs)/1.e6,m_scriptClock.waiting?L" / waiting for tiles":L"");
-        text(progress,l.panel.left+28*l.scale,l.panel.top+(m_recordTab?450:490)*l.scale,m_scriptWhite.Get());
-        if(m_scriptOperation==ScriptOperation::Recording)button(l.checkpoint,L"ADD CHECKPOINT",false);
+        else swprintf_s(progress,L"PLAYING / %.1f / %.1f s",double(m_scriptClock.Elapsed(ScriptNow()))/1.e6,double(m_cameraScript.durationUs)/1.e6);
+        text(progress,l.panel.left+28*l.scale,l.panel.top+470*l.scale,m_scriptWhite.Get());
     }else if(!m_scriptStatus.empty())text(m_scriptStatus.c_str(),l.panel.left+28*l.scale,l.panel.top+503*l.scale,m_scriptWhite.Get());
     const bool enabled=active||m_recordTab||!m_savedScripts.empty();
     button(l.action,active?(m_scriptOperation==ScriptOperation::Recording?L"STOP & SAVE":L"STOP SCRIPT"):(m_recordTab?L"START RECORDING":L"RUN SCRIPT"),m_scriptHover==0,enabled);
@@ -100,7 +94,6 @@ void Renderer::ScriptPanelClick(float x,float y){
     const auto l=Core::ScriptPanelLayout::Build(float(m_width),float(m_height));
     if(m_scriptOperation!=ScriptOperation::Idle){
         if(l.action.Contains(x,y))StopLivestream("USER_STOP");
-        else if(m_scriptOperation==ScriptOperation::Recording&&l.checkpoint.Contains(x,y)){RecordCamera(true);m_trace.Log([](auto& out){out<<"SCRIPT_CHECKPOINT_ADDED";});}
         return;
     }
     m_scriptNameFocused=false;
@@ -112,9 +105,7 @@ void Renderer::ScriptPanelClick(float x,float y){
             const auto row=static_cast<size_t>((y-l.script.top)/(30*l.scale));
             if(row<5&&m_scriptListOffset+row<m_savedScripts.size())m_selectedScript=m_scriptListOffset+row;
         }
-    }else if(!m_recordTab&&l.recordedTiming.Contains(x,y))m_waitCheckpoints=false;
-    else if(!m_recordTab&&l.checkpointTiming.Contains(x,y))m_waitCheckpoints=true;
-    else if(l.action.Contains(x,y)){if(m_recordTab)StartCameraRecording();else StartCameraPlayback();}
+    }else if(l.action.Contains(x,y)){if(m_recordTab)StartCameraRecording();else StartCameraPlayback();}
 }
 Core::ScriptCamera Renderer::CurrentScriptCamera()const{return {m_yaw,m_pitch,m_distanceKm,m_fov,m_planet.frozen};}
 void Renderer::ApplyScriptCamera(const Core::ScriptCamera& c){m_yaw=c.yaw;m_pitch=c.pitch;m_distanceKm=c.distanceKm;m_fov=c.fov;m_planet.frozen=c.frozen;}
@@ -122,68 +113,48 @@ void Renderer::StartCameraRecording(){
     if(m_scriptName.find_first_not_of(L" ")==std::wstring::npos){m_scriptStatus=L"Enter a script name";return;}
     StartLivestream();if(!m_trace.Active())return;
     m_cameraScript={};m_cameraScript.width=m_width;m_cameraScript.height=m_height;
-    m_scriptClock={ScriptNow(),0,0,false};m_scriptOperation=ScriptOperation::Recording;
+    m_scriptClock={ScriptNow()};m_nextCameraSampleUs=10000;m_scriptOperation=ScriptOperation::Recording;
     Core::CameraSample initial{0,CurrentScriptCamera(),false};
     if(initial.camera.frozen){initial.frozenSelection=true;initial.leaves=m_planet.leaves;}
     m_cameraScript.samples.push_back(std::move(initial));m_scriptNameFocused=false;
-    m_trace.Log([](auto& out){out<<"SCRIPT_RECORD_BEGIN format=1 logging=FULL";});
+    m_trace.Log([](auto& out){out<<"SCRIPT_RECORD_BEGIN format=1 logging=FULL sample_hz=100";});
 }
-void Renderer::RecordCamera(bool checkpoint){
+void Renderer::RecordCamera(bool force){
     if(m_scriptOperation!=ScriptOperation::Recording)return;
-    const auto state=CurrentScriptCamera();
-    if(!checkpoint&&!m_cameraScript.samples.empty()&&state==m_cameraScript.samples.back().camera)return;
-    const uint64_t elapsed=m_scriptClock.Elapsed(ScriptNow());
+    const auto elapsed=m_scriptClock.Elapsed(ScriptNow());
+    if(!force&&elapsed<m_nextCameraSampleUs)return;
     if(m_cameraScript.samples.size()>=999999||elapsed>24ull*60*60*1000000)return;
-    Core::CameraSample sample{elapsed,state,checkpoint};
+    const auto state=CurrentScriptCamera();
+    Core::CameraSample sample{elapsed,state,false};
     if(state.frozen&&!m_cameraScript.samples.back().camera.frozen){sample.frozenSelection=true;sample.leaves=m_planet.leaves;}
     m_cameraScript.samples.push_back(std::move(sample));
+    // Sample real state on available render frames. Do not invent historical
+    // positions if a slow frame missed one or more 10-ms sampling intervals.
+    m_nextCameraSampleUs=(elapsed/10000+1)*10000;
 }
 void Renderer::StartCameraPlayback(){
     if(m_selectedScript>=m_savedScripts.size())return;
     Core::CameraScript script;std::string error;
     if(!Core::CameraScript::Load(m_savedScripts[m_selectedScript],script,error)){SetError(error);m_scriptStatus=L"Cannot load selected script / see OrbitX.log";return;}
     if(script.width!=m_width||script.height!=m_height){m_scriptStatus=L"Match the recorded viewport: "+std::to_wstring(script.width)+L" x "+std::to_wstring(script.height);return;}
-    if(m_waitCheckpoints&&std::any_of(script.samples.begin(),script.samples.end(),[](const auto& s){return s.checkpoint&&s.camera.frozen;})){
-        m_scriptStatus=L"Checkpoint waits require unfrozen LOD at checkpoints";return;
-    }
     OnMouseUp();m_savedCamera=CurrentScriptCamera();m_savedOverlay=m_tileOverlay;m_savedGraph=m_showFrameGraph;
     m_savedFrozenLeaves=m_planet.leaves;m_savedFrozenRequests=m_planet.requests;m_savedFrozenDependencies=m_planet.dependencies;
     StartLivestream();if(!m_trace.Active())return;
-    m_cameraScript=std::move(script);m_nextSample=0;m_scriptClock={ScriptNow(),0,0,false};m_scriptOperation=ScriptOperation::Playing;
-    m_checkpointDraws.clear();m_checkpointStableSince={};m_checkpointTimedOut=false;
-    m_trace.Log([&](auto& out){out<<"SCRIPT_RUN_BEGIN logging=FULL timing="<<(m_waitCheckpoints?"CHECKPOINTS":"RECORDED")<<" file=\""<<Core::EnvironmentTrace::Escape(m_savedScripts[m_selectedScript].filename().string())<<"\" cache_policy=EXISTING entries="<<m_tiles.size();});
+    m_cameraScript=std::move(script);m_nextSample=0;m_scriptClock={ScriptNow()};m_nextCameraSampleUs=10000;m_scriptOperation=ScriptOperation::Playing;
+    m_trace.Log([&](auto& out){out<<"SCRIPT_RUN_BEGIN logging=FULL timing=RECORDED interpolation=LINEAR file=\""<<Core::EnvironmentTrace::Escape(m_savedScripts[m_selectedScript].filename().string())<<"\" cache_policy=EXISTING entries="<<m_tiles.size();});
 }
 void Renderer::UpdateScriptPlayback(){
-    if(m_checkpointTimedOut){StopLivestream("CHECKPOINT_TIMEOUT");return;}
     if(m_cameraScript.width!=m_width||m_cameraScript.height!=m_height){StopLivestream("VIEWPORT_CHANGED");return;}
-    if(m_scriptClock.waiting)return;
-    const auto now=ScriptNow();const auto elapsed=m_scriptClock.Elapsed(now);bool applied=false;
+    const auto elapsed=m_scriptClock.Elapsed(ScriptNow());bool applied=false;
     while(m_nextSample<m_cameraScript.samples.size()&&m_cameraScript.samples[m_nextSample].timeUs<=elapsed){
         const auto& sample=m_cameraScript.samples[m_nextSample++];ApplyScriptCamera(sample.camera);applied=true;
         if(sample.frozenSelection){m_planet.leaves=sample.leaves;m_planet.requests.clear();m_planet.dependencies.clear();}
-        TraceCamera("SCRIPT_CAMERA");
-        if(m_waitCheckpoints&&sample.checkpoint){
-            m_scriptClock.Pause(now);m_checkpointWaitStart=now;m_checkpointDraws.clear();m_checkpointStableSince={};
-            m_trace.Log([&](auto& out){out<<"SCRIPT_CHECKPOINT_WAIT sample="<<m_nextSample-1<<" script_us="<<sample.timeUs;});break;
-        }
     }
-    // Allow the last applied view to render before completion and restoration.
-    if(!applied&&!m_scriptClock.waiting&&m_nextSample==m_cameraScript.samples.size()&&elapsed>=m_cameraScript.durationUs)StopLivestream("SCRIPT_COMPLETE");
-}
-void Renderer::CheckScriptCheckpoint(){
-    if(!m_scriptClock.waiting)return;
-    const auto now=ScriptNow();
-    if(now-m_checkpointWaitStart>=30000000){m_checkpointTimedOut=true;return;}
-    const auto completed=m_uploadFence->GetCompletedValue();
-    const bool uploads=std::any_of(m_uploadBatches.begin(),m_uploadBatches.end(),[&](const auto& b){return !b.tiles.empty()&&b.fence>completed;});
-    bool ready=!m_planet.frozen&&m_planet.requests.empty()&&!m_deferredTile&&!uploads&&!m_tileDraws.empty();
-    for(const auto& draw:m_tileDraws)if(draw.id!=draw.source&&m_planet.files.contains(draw.id))ready=false;
-    if(!ready||m_checkpointDraws!=m_tileDraws){m_checkpointStableSince={};m_checkpointDraws=m_tileDraws;return;}
-    const auto steady=std::chrono::steady_clock::now();
-    if(!m_checkpointStableSince.time_since_epoch().count())m_checkpointStableSince=steady;
-    if(std::chrono::duration<double>(steady-m_checkpointStableSince).count()<.25)return;
-    m_trace.Log([&](auto& out){out<<"SCRIPT_CHECKPOINT_SETTLED sample="<<m_nextSample-1<<" wait_us="<<now-m_checkpointWaitStart;});
-    m_scriptClock.Resume(now);
+    if(m_nextSample>0&&m_nextSample<m_cameraScript.samples.size())
+        ApplyScriptCamera(Core::InterpolateCamera(m_cameraScript.samples[m_nextSample-1],m_cameraScript.samples[m_nextSample],elapsed));
+    TraceCamera("SCRIPT_CAMERA");
+    // Render the final recorded view once before completion and restoration.
+    if(!applied&&m_nextSample==m_cameraScript.samples.size()&&elapsed>=m_cameraScript.durationUs)StopLivestream("SCRIPT_COMPLETE");
 }
 void Renderer::FinishCameraScript(const char* reason){
     const auto operation=m_scriptOperation;m_scriptOperation=ScriptOperation::Idle;
@@ -199,17 +170,18 @@ void Renderer::FinishCameraScript(const char* reason){
         if(m_savedCamera.frozen){m_planet.leaves=std::move(m_savedFrozenLeaves);m_planet.requests=std::move(m_savedFrozenRequests);m_planet.dependencies=std::move(m_savedFrozenDependencies);}
         m_tileOverlay=m_savedOverlay;m_showFrameGraph=m_savedGraph;m_telemetryText.clear();
         const std::string why=reason;m_scriptStatus=why=="SCRIPT_COMPLETE"?L"Playback complete / original view restored":L"Playback stopped / original view restored";
-        if(why=="CHECKPOINT_TIMEOUT")m_scriptStatus=L"Checkpoint timed out / original view restored";
         if(why=="VIEWPORT_CHANGED")m_scriptStatus=L"Viewport changed / playback stopped";
     }
-    m_checkpointDraws.clear();m_scriptClock.waiting=false;
 }
 void Renderer::TraceCamera(const char* event){
-    RecordCamera();
+    // LOD freeze changes are discrete commands; capture their exact input time
+    // in addition to the 100-Hz camera samples.
+    if(m_scriptOperation==ScriptOperation::Recording&&!m_cameraScript.samples.empty()
+       &&m_planet.frozen!=m_cameraScript.samples.back().camera.frozen)RecordCamera(true);
     if(!m_trace.Active())return;
     const std::array<double,11> state={double(m_yaw),double(m_pitch),double(m_distanceKm),double(m_fov),double(m_width),double(m_height),double(m_tileOverlay),double(m_showFrameGraph),double(m_planet.frozen),double(m_vsync),double(m_scriptPanelOpen)};
     const bool changed=m_traceCameraStates.Update(0,state);
-    if(!changed&&std::string(event)=="CAMERA_STATE")return;
+    if(!changed&&(std::string(event)=="CAMERA_STATE"||std::string(event)=="SCRIPT_CAMERA"))return;
     m_trace.Log([&](auto& out){
         const auto camera=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm);
         out<<event<<" yaw="<<m_yaw<<" pitch="<<m_pitch<<" distance_km="<<m_distanceKm

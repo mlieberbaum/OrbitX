@@ -38,22 +38,32 @@ int main(){
         std::ofstream out(invalid);out<<contents;out.close();assert(!CameraScript::Load(invalid,loaded,error));
         assert(loaded.samples.size()==script.samples.size()); // Failed loads do not destroy a good script.
     }
-    ScriptClock clock{100,0,0,false};assert(clock.Elapsed(110)==10);
-    clock.Pause(120);clock.Pause(130);assert(clock.Elapsed(1000)==20);
-    clock.Resume(1120);assert(clock.Elapsed(1130)==30);
-    clock.Pause(1140);assert(clock.Elapsed(1200)==40);clock.Resume(1240);assert(clock.Elapsed(1250)==50);
-    // Ordered duplicate timestamps are replayed in file order; checkpoint waits
-    // shift wall time while preserving recorded logical timestamps.
-    ScriptClock playback{0,0,0,false};size_t next=0;
-    auto consume=[&](uint64_t now){while(next<script.samples.size()&&script.samples[next].timeUs<=playback.Elapsed(now)){bool checkpoint=script.samples[next++].checkpoint;if(checkpoint){playback.Pause(now);break;}}};
-    consume(0);assert(next==1);consume(9000000);assert(next==1);
-    consume(10000000);assert(next==2&&playback.waiting);
-    assert(playback.Elapsed(17000000)==10000000);playback.Resume(17000000);
-    consume(17000000);assert(next==3);consume(22000000);assert(next==4);
-    assert(playback.Elapsed(27000000)==script.durationUs);
+    ScriptClock clock{100};assert(clock.Elapsed(110)==10);assert(clock.Elapsed(1000100)==1000000);
+    // Sample endpoints are exact; intermediate frames smoothly cross angle wrap
+    // and retain discrete freeze state until its timestamp.
+    CameraSample first{0,{6.27f,6.27f,1800.f,40.f,false},false};
+    CameraSample second{10000,{.01f,.01f,2000.f,60.f,true},false};
+    assert(InterpolateCamera(first,second,0)==first.camera);
+    assert(InterpolateCamera(first,second,10000)==second.camera);
+    auto middle=InterpolateCamera(first,second,5000);
+    assert(std::abs(std::remainder(double(middle.yaw),2*PlanetPi))<.01);
+    assert(std::abs(std::remainder(double(middle.pitch),2*PlanetPi))<.01);
+    assert(middle.distanceKm==1900.f&&middle.fov==50.f&&!middle.frozen);
+    // North-pole crossing retains the existing continuous orbit orientation.
+    first.camera.pitch=4.70f;second.camera.pitch=4.73f;
+    middle=InterpolateCamera(first,second,5000);
+    auto pole=PlanetCamera::Orbit(middle.yaw,middle.pitch,middle.distanceKm);
+    assert(pole.position.z/middle.distanceKm>.999);
+    assert(std::abs(Dot(pole.up,pole.forward))<1.e-12);
+    // Stationary samples retain a manually recorded loading pause.
+    second.camera=first.camera;second.timeUs=5000000;
+    assert(InterpolateCamera(first,second,2500000)==first.camera);
+    // Duplicate timestamps are deterministic and avoid division by zero.
+    second.timeUs=first.timeUs;second.camera.yaw=1.f;
+    assert(InterpolateCamera(first,second,first.timeUs)==second.camera);
     for(auto [w,h]:{std::pair{3840.f,2160.f},std::pair{1280.f,720.f},std::pair{320.f,180.f}}){
         auto l=ScriptPanelLayout::Build(w,h);assert(l.panel.left>=0&&l.panel.top>=0&&l.panel.right<=w&&l.panel.bottom<=h);
-        assert(!l.action.Contains(l.checkpoint.left,l.checkpoint.top));
+        assert(!l.action.Contains(l.script.left,l.script.top));
         assert(!l.recordTab.Contains(l.runTab.left,l.runTab.top));
     }
     std::filesystem::remove_all(directory);std::cout<<"Camera script tests passed\n";

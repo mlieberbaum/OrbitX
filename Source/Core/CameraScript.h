@@ -23,7 +23,7 @@ struct ScriptCamera {
         &&distanceKm>1737.4&&distanceKm<=1.e9f&&fov>0&&fov<180;}
 };
 struct CameraSample {
-    uint64_t timeUs{};ScriptCamera camera;bool checkpoint=false;
+    uint64_t timeUs{};ScriptCamera camera;bool checkpoint=false; // Legacy format-1 field; ignored during playback.
     // Snapshot at the initial frozen view and each transition into frozen LOD.
     bool frozenSelection=false;std::vector<TileId> leaves;
 };
@@ -90,11 +90,18 @@ struct CameraScript {
         }catch(const std::exception& e){error=e.what();return false;}
     }
 };
-// Monotonic playback time excludes checkpoint waits but includes panel-open time.
+// Recorded pauses are ordinary repeated camera samples, not loader-controlled waits.
 struct ScriptClock {
-    uint64_t start{},pausedAt{},pausedTotal{};bool waiting=false;
-    uint64_t Elapsed(uint64_t now)const{return (waiting?pausedAt:now)-start-pausedTotal;}
-    void Pause(uint64_t now){if(!waiting){pausedAt=now;waiting=true;}}
-    void Resume(uint64_t now){if(waiting){pausedTotal+=now-pausedAt;waiting=false;}}
+    uint64_t start{};
+    uint64_t Elapsed(uint64_t now)const{return now-start;}
 };
+inline ScriptCamera InterpolateCamera(const CameraSample& a,const CameraSample& b,uint64_t timeUs){
+    if(timeUs>=b.timeUs)return b.camera;
+    if(timeUs<=a.timeUs||b.timeUs<=a.timeUs)return a.camera;
+    const double t=double(timeUs-a.timeUs)/double(b.timeUs-a.timeUs);
+    auto angle=[&](float first,float second){return float(double(first)+std::remainder(double(second)-first,2*PlanetPi)*t);};
+    auto linear=[&](float first,float second){return float(double(first)+(double(second)-first)*t);};
+    return {angle(a.camera.yaw,b.camera.yaw),angle(a.camera.pitch,b.camera.pitch),
+        linear(a.camera.distanceKm,b.camera.distanceKm),linear(a.camera.fov,b.camera.fov),a.camera.frozen};
+}
 }

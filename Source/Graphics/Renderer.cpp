@@ -626,6 +626,7 @@ void Renderer::Render(){
  if(m_scriptOperation==ScriptOperation::Recording){
    if(m_cameraScript.width!=m_width||m_cameraScript.height!=m_height)StopLivestream("VIEWPORT_CHANGED");
    else if(m_cameraScript.samples.size()>=999999||std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()-m_scriptClock.start>=24ull*60*60*1000000)StopLivestream("SCRIPT_LIMIT_REACHED");
+   else RecordCamera();
  }
  if(m_scriptOperation==ScriptOperation::Playing)UpdateScriptPlayback();
  if(m_trace.Active())TraceCamera("CAMERA_STATE");
@@ -637,7 +638,6 @@ void Renderer::Render(){
  if(elapsed>=0.5){m_fps=m_fpsFrames/elapsed;m_fpsFrames=0;m_fpsStart=now;}
  ++m_fpsFrames;
  if(m_appState==AppState::Simulation && !UpdatePlanet()) return;
- if(m_scriptOperation==ScriptOperation::Playing)CheckScriptCheckpoint();
  UpdateCB();
  if(m_trace.Active()){
    TraceFrameSnapshot();

@@ -182,34 +182,35 @@ is assumed necessary before measuring the new counters.
 
 Load Moon View normally, then press **Ctrl+R** to toggle the green glass panel.
 The **Record** tab accepts a script name; **START RECORDING** hides the panel and
-records timestamped camera states while the existing drag/wheel controls work.
-Ctrl+R reopens it without pausing recording. **ADD CHECKPOINT** marks the current
-view; **STOP & SAVE** closes the panel and saves the camera script and diagnostic
-log. Scenario exit and shutdown also save and close an active recording.
+records camera states at a target **100 Hz** while the existing drag/wheel controls work.
+Ctrl+R reopens it without pausing recording. **STOP & SAVE** closes the panel
+and saves the camera script and diagnostic log. Scenario exit and shutdown also save and close an active recording.
 
 The **Run** tab lists saved `.oxscript` files from **OrbitX/Runtime/Scripts**.
 Click a row to select it; use the mouse wheel to scroll additional scripts.
-**RUN SCRIPT** hides the panel and replays the selected camera path. **Recorded
-timing** applies camera changes at their recorded monotonic elapsed times, with
-no interpolation. **Wait at checkpoints** pauses the logical timeline at each
-marked view until required uploads finish and selected/drawn coverage remains
-unchanged for 250 ms. A 30-second timeout stops playback with a diagnostic event;
-checkpoints with frozen LOD are rejected because they cannot establish fresh
-selection convergence. Mark checkpoints at views you want to compare; a script
-without checkpoints follows recorded timing under either policy.
+**RUN SCRIPT** hides the panel and replays the camera path on its original
+monotonic timeline. Every render frame interpolates angles along the shortest
+wrapped arc and linearly interpolates distance/FOV between timestamped samples.
+Actual sample endpoints are reproduced exactly. Repeated stationary samples keep
+your manually recorded loading pauses. There are no checkpoints or automatic
+waits for tile loading. LOD-freeze transitions are discrete commands captured at
+their input timestamps. The sample target is 10 ms; if rendering falls below
+100 Hz, samples use the actual available frame times rather than inventing
+historical positions. Sampling is an approximation of the camera between samples,
+not an identical recording of every rendered frame.
 
 Logging options are **Benchmark**, **Full**, and **Regression**. Full is the
 existing livestream diagnostic trace; Benchmark and Regression remain disabled.
 Full mode leaves overlays and the FPS graph active according to user settings.
 Playback temporarily owns camera/LOD controls. Ctrl+R can show or hide the panel
 without pausing playback; **STOP SCRIPT** cancels and closes the panel. Completion,
-cancellation, timeout, log failure and scenario exit restore the pre-run camera,
+cancellation, log failure and scenario exit restore the pre-run camera,
 FOV, LOD-freeze state, overlays and graph. If the original LOD was frozen, its
 selected leaves and dependency state are restored too. Textures remain cached.
 
 Camera scripts are separate from logs. They contain an initial camera state,
-viewport, duration, microsecond-timed state changes, checkpoints and LOD-freeze
-changes. Geographic latitude/longitude/altitude metadata accompanies exact float
+viewport, duration, microsecond-timed samples and LOD-freeze
+changes. Legacy format-1 checkpoint markers are accepted but ignored. Geographic latitude/longitude/altitude metadata accompanies exact float
 orbit angles, distance and FOV, preserving existing pole-crossing orientation
 without changing the camera math. Initial frozen selection and later transitions
 into frozen LOD carry selected-leaf snapshots. Replays require the recorded
@@ -270,5 +271,9 @@ panel hit regions, and identical traced/untraced quadtree leaves and requests ov
 equatorial and polar views. `PlanetSurfaceTests.cpp` remains the existing baseline.
 `Source/Tests/CameraScriptTests.cpp` checks exact camera round-tripping through
 pole views, frozen-selection snapshots, invalid-file rejection, overwrite
-protection and checkpoint clock behavior. Windows build, panel appearance and
+protection, smooth interpolation, angular wrap and recorded pauses. Windows build, panel appearance and
 real DDS streaming require local verification.
+
+All four Visual Studio configurations enable **Multi-processor Compilation**
+(`/MP`) for parallel C++ compilation. This changes build scheduling only; it does
+not add game/render threads or alter runtime behavior.
