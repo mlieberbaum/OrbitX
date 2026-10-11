@@ -35,11 +35,14 @@ Launch **Moon View**, then use:
 
 | Control | Action |
 | --- | --- |
-| Ctrl+I | Toggle thin tile boundaries (default off) |
-| Ctrl+O | Independently toggle 16% tile tint (default off) |
+| Ctrl+O | Toggle 16% tile tint, thin boundaries, and colored center LOD numbers together (default off) |
 | Ctrl+L | Freeze/unfreeze selected leaf set; camera still moves |
 | Right drag / wheel | Camera rotation / Orbiter planetary wheel zoom |
 | Ctrl+F | Toggle the transparent FPS history graph (default on) |
+
+Ctrl+I has no action. Center numbers identify each selected patch's geometry LOD
+and use the same color as its tint and boundaries. Centers behind the lunar limb
+or outside the viewport are not labeled; the HUD reports texture-source LOD separately.
 
 In Release_Planet, diagnostics appear below the existing upper-right text. They
 separate highest rendered **texture source** level from highest resident DDS

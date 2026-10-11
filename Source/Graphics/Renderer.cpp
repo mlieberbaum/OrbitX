@@ -586,6 +586,7 @@ void Renderer::DrawHudText(){
    }
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
  }else{
+   if(m_tileOverlay)DrawPlanetLabels();
    constexpr float left=12,rightPad=12,line=22,top=8;draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);wchar_t buf[96];swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+3*line,false);swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+4*line,false);draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
    swprintf_s(buf,L"FPS %.1f",m_fps);draw(buf,(float)m_width-rightPad,top+2*line,true);
    if(m_showFrameGraph)DrawFrameRateGraph();
@@ -707,8 +708,7 @@ void Renderer::Resize(UINT width,UINT height){
 void Renderer::OnKeyDown(WPARAM k){
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
    if(k=='F'){m_showFrameGraph=!m_showFrameGraph;return;}
-   if(k=='I'){m_boundaries=!m_boundaries;return;}
-   if(k=='O'){m_shading=!m_shading;return;}
+   if(k=='O'){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();return;}
    if(k=='L'){m_planet.frozen=!m_planet.frozen;return;}
  }
  if(k==VK_ESCAPE){

@@ -57,6 +57,9 @@ private:
     bool BuildPlanetMesh();
     void DrawPlanet();
     void DrawPlanetTelemetry(float x,float y);
+    void DrawPlanetLabels();
+    std::array<Microsoft::WRL::ComPtr<IDWriteTextLayout>,20> m_tileLabelLayouts;
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_tileLabelBrush;
     void DrawFrameRateGraph();
     void DrawCachedHudText(const std::wstring& text,float x,float y,bool right,float maxWidth=0);
     struct HudText {
@@ -121,7 +124,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_timestampReadback;
     UINT64 m_timestampFrequency=0;
     bool m_hasTimestamp[FrameCount]{};
-    bool m_boundaries=false,m_shading=false;
+    bool m_tileOverlay=false;
     UINT64 m_tileClock=0,m_tileBytes=0;
     UINT m_srvStride{};
     int m_renderedLOD=0,m_residentLOD=0;
