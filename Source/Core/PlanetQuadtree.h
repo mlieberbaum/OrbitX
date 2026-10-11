@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include "PlanetCoordinates.h"
+#include "EnvironmentTrace.h"
 
 namespace OrbitX::Core {
 struct TileId {
@@ -51,33 +52,55 @@ public:
     }
     void Select(double cx,double cy,double cz,double radius,double pixelsPerRadian,
                 const std::function<bool(TileId)>& resident,
-                const std::function<bool(PlanetVector,double)>& inView={}) {
-        if(frozen && !leaves.empty()) return;
+                const std::function<bool(PlanetVector,double)>& inView={},EnvironmentTrace* trace=nullptr) {
+        if(frozen && !leaves.empty()) {
+            if(trace)trace->Log([&](auto& out){out<<"SELECTION_FROZEN leaves="<<leaves.size();});
+            return;
+        }
         leaves.clear();requests.clear();
         const double distance=std::sqrt(cx*cx+cy*cy+cz*cz);
-        auto request=[&](TileId id){if(files.contains(id)&&!resident(id))requests.push_back(id);};
+        auto request=[&](TileId id){if(files.contains(id)&&!resident(id)){
+            requests.push_back(id);
+            if(trace)trace->Log([&](auto& out){out<<"TILE_REQUEST tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
+        }};
         std::function<void(TileId)> visit=[&](TileId id) {
             auto b=Bounds(id);constexpr double rad=PlanetPi/180;
             auto normal=SurfaceDirection((b.north+b.south)*.5*rad,(b.east+b.west)*.5*rad);
             double angle=std::acos(std::clamp(Dot(normal,{cx,cy,cz})/distance,-1.0,1.0));
             double extent=std::min(PlanetPi,((b.north-b.south)+(b.east-b.west))*.5*rad);
-            if(angle-extent>std::acos(std::clamp(radius/distance,0.0,1.0))) return;
-            if(inView && !inView(normal*radius,2*radius*std::sin(extent*.5))) return;
+            if(trace)trace->Log([&](auto& out){out<<"TILE_QUERY tile="<<id.level<<"/"<<id.row<<"/"<<id.column
+                <<" angle="<<angle<<" extent="<<extent<<" center="<<normal.x<<","<<normal.y<<","<<normal.z;});
+            if(angle-extent>std::acos(std::clamp(radius/distance,0.0,1.0))) {
+                if(trace)trace->Log([&](auto& out){out<<"TILE_CULL tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=HORIZON";});return;
+            }
+            if(inView && !inView(normal*radius,2*radius*std::sin(extent*.5))) {
+                if(trace)trace->Log([&](auto& out){out<<"TILE_CULL tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=FRUSTUM";});return;
+            }
             request(id);
             auto delta=PlanetVector{cx,cy,cz}-normal*radius;
             double nearDistance=std::max(distance-radius,std::sqrt(Dot(delta,delta))-radius*extent);
             double footprint=radius*(b.north-b.south)*rad*pixelsPerRadian/nearDistance;
             bool children=false;for(int r=0;r<2;r++)for(int c=0;c<2;c++)children|=nodes.contains({id.level+1,id.row*2+r,id.column*2+c});
+            if(trace)trace->Log([&](auto& out){out<<"LOD_DECISION tile="<<id.level<<"/"<<id.row<<"/"<<id.column
+                <<" footprint="<<footprint<<" threshold=384 near_distance="<<nearDistance<<" children="<<children
+                <<" leaves_so_far="<<leaves.size()<<" leaf_limit=1500 max_level=19";});
             if(id.level<19 && footprint>384 && children && leaves.size()<1500) {
                 bool ready=true;
                 for(int r=0;r<2;r++)for(int c=0;c<2;c++) {
                     TileId child{id.level+1,id.row*2+r,id.column*2+c};
                     request(child);if(files.contains(child)&&!resident(child))ready=false;
+                    if(trace)trace->Log([&](auto& out){out<<"CHILD_COVERAGE tile="<<child.level<<"/"<<child.row<<"/"<<child.column
+                        <<" has_file="<<files.contains(child)<<" resident="<<resident(child);});
                 }
                 // D3D9 principle: render the parent until its child coverage is ready.
-                if(ready){for(int r=0;r<2;r++)for(int c=0;c<2;c++)visit({id.level+1,id.row*2+r,id.column*2+c});return;}
+                if(ready){
+                    if(trace)trace->Log([&](auto& out){out<<"TILE_REFINE tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
+                    for(int r=0;r<2;r++)for(int c=0;c<2;c++)visit({id.level+1,id.row*2+r,id.column*2+c});return;
+                }
+                if(trace)trace->Log([&](auto& out){out<<"PARENT_RETAIN tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=CHILD_NOT_READY";});
             }
             leaves.push_back(id);
+            if(trace)trace->Log([&](auto& out){out<<"SELECT_LEAF tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
         };
         visit({4,0,0});visit({4,0,1});
         std::sort(requests.begin(),requests.end());requests.erase(std::unique(requests.begin(),requests.end()),requests.end());

@@ -3,6 +3,7 @@
 #include "../Core/TexturePaths.h"
 #include "../Core/DisplayPreferences.h"
 #include "../Core/PlanetZoom.h"
+#include "../Core/ScriptPanelLayout.h"
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <algorithm>
@@ -27,7 +28,7 @@ namespace OrbitX::Graphics {
 static D3D12_HEAP_PROPERTIES Heap(D3D12_HEAP_TYPE t){ D3D12_HEAP_PROPERTIES h{}; h.Type=t; return h; }
 static D3D12_RESOURCE_DESC BufferDesc(UINT64 n){ D3D12_RESOURCE_DESC d{}; d.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER; d.Width=n; d.Height=1; d.DepthOrArraySize=1; d.MipLevels=1; d.SampleDesc.Count=1; d.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR; return d; }
 static std::string HrText(HRESULT hr){ char b[64]; sprintf_s(b,"HRESULT 0x%08X",(unsigned)hr); return b; }
-void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<s<<"\n";}
+void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<s<<"\n";m_trace.Log([&](auto& out){out<<"ERROR message=\""<<Core::EnvironmentTrace::Escape(s)<<"\"";});}
 
 bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hwnd=hwnd;m_width=w;m_height=h;m_root=root;
  std::filesystem::path textureRoot;std::string textureError;
@@ -44,7 +45,7 @@ bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hw
 #if defined(_DEBUG)
  ComPtr<ID3D12Debug> dbg; if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer();
 #endif
- if(!InitDevice()||!InitAssets()) return false; m_tileLoader.Start(); return true; }
+ if(!InitDevice()||!InitAssets()) return false; m_tileLoader.SetTrace(&m_trace);m_tileLoader.Start(); return true; }
 
 bool Renderer::InitDevice(){ HRESULT hr=CreateDXGIFactory2(0,IID_PPV_ARGS(&m_factory)); if(FAILED(hr)){SetError("CreateDXGIFactory2: "+HrText(hr));return false;}
  ComPtr<IDXGIAdapter1>a; for(UINT i=0;m_factory->EnumAdapters1(i,&a)!=DXGI_ERROR_NOT_FOUND;i++){DXGI_ADAPTER_DESC1 d{};a->GetDesc1(&d);if(d.Flags&DXGI_ADAPTER_FLAG_SOFTWARE){a.Reset();continue;} if(SUCCEEDED(D3D12CreateDevice(a.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&m_device))))break;a.Reset();}
@@ -606,6 +607,7 @@ void Renderer::DrawHudText(){
 #ifdef PLANET_DEBUG_MODE
    DrawPlanetTelemetry((float)m_width-rightPad,top+4*line);
 #endif
+   if(m_scriptPanelOpen)DrawScriptPanel();
  }
 
  HRESULT hr=m_d2dContext->EndDraw();
@@ -617,6 +619,9 @@ void Renderer::DrawHudText(){
 
 void Renderer::Update(float){} // Scene constants are written once in Render().
 void Renderer::Render(){
+ if(m_traceSession&&!m_trace.Active())StopLivestream("LOG_IO_FAILURE");
+ ++m_traceFrame;
+ if(m_trace.Active()){m_trace.SetFrame(m_traceFrame);TraceCamera("FRAME_BEGIN");}
  const auto now=std::chrono::steady_clock::now();
  if(m_appState==AppState::Simulation && m_lastFrameStart.time_since_epoch().count())m_frameHistory.AddFrame(std::chrono::duration<double>(now-m_lastFrameStart).count());
  if(m_appState!=AppState::Simulation){m_frameHistory.Clear();m_graphGeometry.Reset();m_graphSampleTime=-1;}
@@ -626,6 +631,13 @@ void Renderer::Render(){
  ++m_fpsFrames;
  if(m_appState==AppState::Simulation && !UpdatePlanet()) return;
  UpdateCB();
+ if(m_trace.Active()){
+   TraceFrameSnapshot();
+   SceneCB scene{};memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));
+   m_trace.Log([&](auto& out){out<<"SCENE_MATRIX mvp=";for(const auto& row:scene.mvp.m)for(float value:row)out<<value<<",";
+     out<<" model=";for(const auto& row:scene.model.m)for(float value:row)out<<value<<",";
+     out<<" sun_dir="<<scene.sunDir.x<<","<<scene.sunDir.y<<","<<scene.sunDir.z;});
+ }
  m_alloc[m_frame]->Reset();m_cmd->Reset(m_alloc[m_frame].Get(),m_scenePSO.Get());
  D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=m_back[m_frame].Get();b.Transition.StateBefore=D3D12_RESOURCE_STATE_PRESENT;b.Transition.StateAfter=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;m_cmd->ResourceBarrier(1,&b);
  auto r=m_rtvHeap->GetCPUDescriptorHandleForHeapStart();r.ptr+=m_frame*m_rtvStride;auto ds=m_dsvHeap->GetCPUDescriptorHandleForHeapStart();float clear[]={0,0,0,1};m_cmd->ClearRenderTargetView(r,clear,0,nullptr);m_cmd->ClearDepthStencilView(ds,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);m_cmd->OMSetRenderTargets(1,&r,FALSE,&ds);
@@ -646,6 +658,8 @@ void Renderer::Render(){
  if(FAILED(presented)){SetError("Present: "+HrText(presented));return;}
  MoveToNextFrame();
  m_presentMs=m_presentMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentStart).count()*.1;
+ m_trace.Log([&](auto& out){out<<"FRAME_END scene_cpu_ms="<<m_sceneCpuMs<<" hud_cpu_ms="<<m_hudCpuMs
+   <<" scene_gpu_ms="<<m_sceneGpuMs<<" present_wait_ms="<<m_presentMs<<" fps="<<m_fps;});
 }
 void Renderer::WaitForGPU(){
  UINT64 value=++m_nextFenceValue;
@@ -667,6 +681,7 @@ void Renderer::MoveToNextFrame(){
 }
 void Renderer::Shutdown(){
  m_tileLoader.Stop();
+ StopLivestream("APPLICATION_SHUTDOWN");
  if(m_uploadQueue&&m_uploadFence){auto value=++m_uploadFenceValue;m_uploadQueue->Signal(m_uploadFence.Get(),value);m_uploadFence->SetEventOnCompletion(value,m_fenceEvent);WaitForSingleObject(m_fenceEvent,INFINITE);}
  if(m_queue)WaitForGPU();
  for(auto& batch:m_uploadBatches)if(batch.arena)batch.arena->Unmap(0,nullptr);
@@ -674,6 +689,7 @@ void Renderer::Shutdown(){
 }
 void Renderer::Resize(UINT width,UINT height){
  if(!m_swap||width==0||height==0||(width==m_width&&height==m_height))return;
+ m_trace.Log([&](auto& out){out<<"RESIZE width="<<width<<" height="<<height;});
 
  // ResizeBuffers requires every direct and indirect reference to the old swap-chain
  // buffers to be gone. With D3D11On12/D2D the destruction order matters.
@@ -719,15 +735,17 @@ void Renderer::Resize(UINT width,UINT height){
  if(log)log<<"Resize: client="<<m_width<<"x"<<m_height<<" swapchain="<<m_width<<"x"<<m_height<<" aspect="<<(double(m_width)/double(m_height))<<"\n";
 }
 void Renderer::OnKeyDown(WPARAM k){
+ m_trace.Log([&](auto& out){out<<"INPUT_KEY key="<<k<<" ctrl="<<bool(GetKeyState(VK_CONTROL)&0x8000);});
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
-   if(k=='F'){m_showFrameGraph=!m_showFrameGraph;return;}
-   if(k=='O'){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();return;}
-   if(k=='L'){m_planet.frozen=!m_planet.frozen;return;}
+   if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
+   if(k=='F'){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
+   if(k=='O'){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
+   if(k=='L'){m_planet.frozen=!m_planet.frozen;TraceCamera("LOD_FREEZE_TOGGLE");return;}
  }
  if(k==VK_ESCAPE){
    // In simulation, Escape exits the active scenario back to the OrbitX main menu.
    // In menus/submenus, navigation is intentionally handled only by the on-screen BACK control.
-   if(m_appState==AppState::Simulation){ OnMouseUp(); m_appState=AppState::MainMenu; m_hoverSelection=-1; }
+   if(m_appState==AppState::Simulation){ OnMouseUp();StopLivestream("SCENARIO_EXIT"); m_appState=AppState::MainMenu; m_hoverSelection=-1; }
    return;
  }
  if(m_appState==AppState::Simulation)return;
@@ -735,7 +753,13 @@ void Renderer::OnKeyDown(WPARAM k){
  // A scenario is launched only with the explicit LAUNCH control, never by selecting it.
 }
 void Renderer::OnLeftClick(int x,int y){
- if(m_appState==AppState::Simulation)return;
+ m_trace.Log([&](auto& out){out<<"INPUT_LEFT_CLICK x="<<x<<" y="<<y;});
+ if(m_appState==AppState::Simulation){
+   if(m_scriptPanelOpen && Core::ScriptPanelLayout::Build(float(m_width),float(m_height)).action.Contains(float(x),float(y))){
+     if(m_trace.Active())StopLivestream("USER_STOP");else StartLivestream();
+   }
+   return;
+ }
  if(m_appState==AppState::MainMenu){
    const auto layout=OrbitX::UI::BuildMainMenuLayout((float)m_width,(float)m_height);
    const int hit=OrbitX::UI::HitTestMainMenu(layout,(float)x,(float)y);
@@ -761,10 +785,12 @@ void Renderer::OnLeftClick(int x,int y){
 
 void Renderer::SetVSync(bool enabled){
  m_vsync=enabled;
+ m_trace.Log([&](auto& out){out<<"VSYNC enabled="<<enabled;});
  if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
 }
 void Renderer::SetFullscreen(bool enabled){
  if(enabled==m_fullscreen)return;
+ m_trace.Log([&](auto& out){out<<"FULLSCREEN enabled="<<enabled;});
  if(enabled){
    m_windowedStyle=(DWORD)GetWindowLongPtr(m_hwnd,GWL_STYLE);m_windowedPlacement.length=sizeof(WINDOWPLACEMENT);GetWindowPlacement(m_hwnd,&m_windowedPlacement);
    MONITORINFO mi{sizeof(mi)};GetMonitorInfo(MonitorFromWindow(m_hwnd,MONITOR_DEFAULTTONEAREST),&mi);
@@ -777,15 +803,21 @@ void Renderer::SetFullscreen(bool enabled){
  if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
 }
 void Renderer::OnMouseDown(int,int){
- if(m_appState!=AppState::Simulation||m_drag)return;
+ if(m_appState!=AppState::Simulation||m_drag||m_scriptPanelOpen)return;
+ m_trace.Log([&](auto& out){out<<"INPUT_DRAG_BEGIN";});
  m_drag=true;SetCapture(m_hwnd);ShowCursor(FALSE);
  GetCursorPos(&m_dragAnchorScreen);
 }
 void Renderer::OnMouseUp(){
  if(!m_drag)return;
+ m_trace.Log([&](auto& out){out<<"INPUT_DRAG_END";});
  m_drag=false;if(GetCapture()==m_hwnd)ReleaseCapture();ShowCursor(TRUE);
 }
 void Renderer::OnMouseMove(int x,int y){
+ m_trace.Log([&](auto& out){out<<"INPUT_MOUSE_MOVE x="<<x<<" y="<<y<<" dragging="<<m_drag;});
+ if(m_appState==AppState::Simulation&&m_scriptPanelOpen){
+   m_scriptHover=Core::ScriptPanelLayout::Build(float(m_width),float(m_height)).action.Contains(float(x),float(y))?0:-1;return;
+ }
  if(m_appState==AppState::MainMenu&&!m_drag){
    const auto layout=OrbitX::UI::BuildMainMenuLayout((float)m_width,(float)m_height);
    m_mouseNavigation=true;
@@ -826,13 +858,16 @@ void Renderer::OnMouseMove(int x,int y){
  m_yaw=fmodf(m_yaw,twoPi);if(m_yaw<0.0f)m_yaw+=twoPi;
  m_pitch=fmodf(m_pitch,twoPi);if(m_pitch<0.0f)m_pitch+=twoPi;
  SetCursorPos(m_dragAnchorScreen.x,m_dragAnchorScreen.y);
+ TraceCamera("CAMERA_DRAG");
 }
 void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;}}
 
 void Renderer::OnMouseWheel(short d){
- if(m_appState!=AppState::Simulation || (GetKeyState(VK_CONTROL)&0x8000))return;
+ if(m_appState!=AppState::Simulation || m_scriptPanelOpen || (GetKeyState(VK_CONTROL)&0x8000))return;
+ m_trace.Log([&](auto& out){out<<"INPUT_WHEEL delta="<<d;});
  m_distanceKm=float(Core::PlanetWheelDistance(m_distanceKm,1737.4,d));
  // Round Orbiter's surface floor upward when storing in float, never beneath the double-precision sphere.
  if(m_distanceKm<1737.4)m_distanceKm=std::nextafter(1737.4f,2000.f);
+ TraceCamera("CAMERA_WHEEL");
 }
 }

@@ -20,6 +20,7 @@
 #include <array>
 #include "DdsTileLoader.h"
 #include "../Core/FrameRateHistory.h"
+#include "../Core/EnvironmentTrace.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -58,6 +59,17 @@ private:
     void DrawPlanet();
     void DrawPlanetTelemetry(float x,float y);
     void DrawPlanetLabels();
+    void DrawScriptPanel();
+    void StartLivestream();
+    void StopLivestream(const char* reason);
+    void TraceCamera(const char* event);
+    void TraceFrameSnapshot();
+    bool m_scriptPanelOpen=false;
+    bool m_traceSession=false;
+    int m_scriptHover=-1;
+    std::wstring m_scriptStatus;
+    uint64_t m_traceFrame=0;
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_scriptGreen,m_scriptGlass,m_scriptWhite,m_scriptDisabled;
     std::array<Microsoft::WRL::ComPtr<IDWriteTextLayout>,20> m_tileLabelLayouts;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_tileLabelBrush;
     void DrawFrameRateGraph();
@@ -109,6 +121,7 @@ private:
         std::vector<Core::TileId> tiles;
     };
     Core::PlanetQuadtree m_planet;
+    Core::EnvironmentTrace m_trace; // Must outlive the DDS worker and its trace callbacks.
     DdsTileLoader m_tileLoader;
     std::optional<DdsTileLoader::Result> m_deferredTile;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_uploadQueue;

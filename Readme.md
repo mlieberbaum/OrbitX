@@ -2,11 +2,13 @@
 
 ## Moon quadtree prototype
 
-Open `Source/OrbitX.sln` in Visual Studio, select **Release_Planet | x64**, and press **F5**.
-The existing v145 toolset and Windows SDK requirements apply. `Release_Planet` defines
+Open `Source/OrbitX.sln` in Visual Studio, select **Env_Test_Release | x64**, and press **F5**.
+The existing v145 toolset and Windows SDK requirements apply. `Env_Test_Release` defines
 `NDEBUG`, `NOMINMAX`, and `PLANET_DEBUG_MODE`; planetary textures are fully illuminated.
-Release and Release_Planet use `/O2`, whole-program/link-time optimization and optimized
-shaders. Ordinary Debug retains debug libraries and the graphics debug layer.
+Release and Env_Test_Release use `/O2`, whole-program/link-time optimization and optimized
+shaders. `Env_Test_Debug` provides the same fully illuminated environmental view and
+diagnostics with `_DEBUG`, disabled optimization, debug runtime libraries and the
+graphics debug layer. Ordinary Debug retains debug libraries and the graphics debug layer.
 Standard Debug/Release retain directional Sun lighting.
 
 `Runtime/Config/OrbitX.cfg` supplies the shared `TextureRoot`. The Moon DDS
@@ -44,7 +46,7 @@ Ctrl+I has no action. Center numbers identify each selected patch's geometry LOD
 and use the same color as its tint and boundaries. Centers behind the lunar limb
 or outside the viewport are not labeled; the HUD reports texture-source LOD separately.
 
-In Release_Planet, diagnostics appear below the existing upper-right text. They
+In Env_Test_Release, diagnostics appear below the existing upper-right text. They
 separate highest rendered **texture source** level from highest resident DDS
 level, show drawn geometry leaves, resident/pending/failed textures, and actual
 DDS GPU allocation size. Timings separate selection, upload CPU work, background
@@ -134,7 +136,7 @@ Visual Studio compilation, HLSL compilation, and live DX12 rendering must still
 be checked on Windows with the actual DDS database.
 
 Suggested Windows acceptance check: build all three configurations; launch Moon
-View in Release_Planet; verify both hemispheres and poles, zoom through LOD changes,
+View in Env_Test_Release; verify both hemispheres and poles, zoom through LOD changes,
 exercise each toggle independently, freeze and rotate, and inspect paths. Verify
 Sinus Iridum orientation, north-up/east-right at the initial camera, seamless
 pole crossings and drag responsiveness while tiles are pending. Toggle VSync
@@ -172,3 +174,51 @@ rendering must be measured on the user's system. A remaining large HUD CPU time
 would justify investigating the Direct2D/D3D11On12 path; a large presentation
 wait would justify examining DXGI presentation/frame buffering. Neither change
 is assumed necessary before measuring the new counters.
+
+
+## Environmental livestream recorder
+
+Load Moon View normally, then press **Ctrl+R** to toggle the glass script panel.
+The script list currently contains **Manual exploration**. Livestream is selected;
+Benchmark and Regression are disabled placeholders and cannot be run.
+Click **RUN SCRIPT** to begin recording and hide the panel. Camera exploration
+continues with the existing drag and wheel controls. Ctrl+R opens the panel during
+recording with **STOP SCRIPT** as its sole action. Ctrl+R can hide the panel again
+without stopping recording. STOP SCRIPT closes the log and the panel. Scenario
+exit and application shutdown also close the recording cleanly.
+
+Livestream never changes camera position, LOD freeze, overlay, or FPS graph state.
+The panel consumes camera gestures only while open. Benchmark/regression overlay
+save/disable/restore behavior is deferred until those modes are implemented.
+
+Logs are written to **OrbitX/Runtime/Logs**, using the Visual Studio Runtime working
+directory, e.g. `Livestream_2026-10-10_210445_123456.log`. Filenames use recording
+start time; timestamps use local system time with six fractional digits and no
+timezone suffix. Every line includes a global sequence, render frame number and
+monotonic elapsed microseconds, followed by one event. DDS-worker events are
+serialized with render-thread events. Timestamp precision does not guarantee that
+all events have distinct timestamps; the sequence number resolves ties.
+
+The trace includes initial resident/failed/queued/in-flight state, complete camera
+poses and matrices, inputs/settings, every traversal query and LOD decision,
+requested and selected tiles, actual texture sources and UV ranges, loader queue
+queries/cancellations/results, upload submission and activation, resource eviction
+reasons, cache usage and GPU fence values. Draw records use `level/row/column` IDs
+and preserve the actual source LOD when ancestor fallback is used. Complete per-frame
+coverage can be reconstructed against the same DDS collection. This is an execution
+trace, not a screenshot/video capture or an automatic replay tool.
+
+Livestream intentionally records synchronously through a thread-safe buffered
+stream. It can substantially reduce FPS and affect asynchronous completion timing;
+use it for diagnosis, not performance measurement. When inactive, log builders are
+skipped before formatting/locking/I/O. Open/write/flush failures are reported;
+records are never silently dropped from a bounded queue. The completed file has a
+`TRACE_STOP` terminal event unless an I/O failure or abrupt process termination
+prevents it. Streamed textures remain cached after stopping; no camera/texture
+pipeline reset is performed.
+
+Portable verification: `Source/Tests/EnvironmentTraceTests.cpp` checks timestamp
+format, event sequencing, concurrent writers, close/restart and failure recovery,
+panel hit regions, and identical traced/untraced quadtree leaves and requests over
+equatorial and polar views. `PlanetSurfaceTests.cpp` remains the existing baseline.
+Windows build, panel appearance and real DDS streaming require local verification.
