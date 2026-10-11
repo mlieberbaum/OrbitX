@@ -8,7 +8,7 @@ using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 namespace OrbitX::Graphics {
 namespace {
-constexpr UINT64 Budget=512ull*1024*1024;
+constexpr UINT64 Budget=1024ull*1024*1024;
 D3D12_HEAP_PROPERTIES PlanetHeap(D3D12_HEAP_TYPE type){D3D12_HEAP_PROPERTIES h{};h.Type=type;return h;}
 D3D12_RESOURCE_DESC PlanetBuffer(UINT64 size){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;d.Width=size;d.Height=1;d.DepthOrArraySize=1;d.MipLevels=1;d.SampleDesc.Count=1;d.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;return d;}
 constexpr std::array<UINT,8> Palette={0xFF3030,0x00E5FF,0xFFE600,0xFF39DE,0x32FF57,0xFF8A00,0x4285FF,0xFFFFFF};

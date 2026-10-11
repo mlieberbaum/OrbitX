@@ -82,7 +82,7 @@ retain their native dimensions/mips, up to 16384 pixels per axis per resource;
 the combined quadtree surface is not limited to that size. BC1, BC2, BC3 and supported DX10 BC7 DDS mip chains are uploaded as-is.
 Malformed/unsupported detail tiles log once and retain DDS ancestor fallback.
 
-The DDS cache has a 512 MiB allocation budget and 2,048 descriptor slots; currently
+The DDS cache has a 1 GiB allocation budget and 8,192 tile descriptor slots; currently
 drawn textures are pinned and other textures are evicted by last use. Mesh and transient uploads are excluded from the reported DDS allocation
 size. The selector uses projected tile size, conservative horizon culling and
 camera-frustum sphere tests. Drawn leaf count means patches

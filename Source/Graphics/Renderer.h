@@ -102,7 +102,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_sceneRoot; Microsoft::WRL::ComPtr<ID3D12PipelineState> m_scenePSO;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_cb; UINT8* m_cbPtr{};
 
-    static constexpr UINT TileCapacity=2048;
+    static constexpr UINT TileCapacity=8192;
     struct TileResource {
         Microsoft::WRL::ComPtr<ID3D12Resource> texture;
         UINT slot{};UINT64 bytes{},touched{},lastDrawFence{},uploadFence{};
