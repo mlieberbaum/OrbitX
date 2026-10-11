@@ -82,7 +82,7 @@ public:
             double nearDistance=std::max(distance-radius,std::sqrt(Dot(delta,delta))-radius*extent);
             double footprint=radius*(b.north-b.south)*rad*pixelsPerRadian/nearDistance;
             bool children=false;for(int r=0;r<2;r++)for(int c=0;c<2;c++)children|=nodes.contains({id.level+1,id.row*2+r,id.column*2+c});
-            if(id.level<19 && footprint>384 && children && leaves.size()<1500) {
+            if(id.level<19 && footprint>384 && children && leaves.size()<4096) {
                 bool ready=true;TileId missing{};
                 for(int r=0;r<2;r++)for(int c=0;c<2;c++) {
                     TileId child{id.level+1,id.row*2+r,id.column*2+c};
