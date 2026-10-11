@@ -10,8 +10,19 @@ using namespace OrbitX::Core;
 int main(){
     auto directory=std::filesystem::temp_directory_path()/("OrbitXTraceTest_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     EnvironmentTrace trace;
+    struct PatchState {TileId id,source;unsigned slot,grid;float uv[4];bool operator==(const PatchState&) const = default;};
+    TraceStateCache<TileId,PatchState> numeric;
+    PatchState patch{{11,0,0},{11,0,0},1,3,{0,0,1,1}};
+    unsigned formattedStates=0;
+    for(int i=0;i<1000;i++)if(numeric.Update(patch.id,patch))++formattedStates;
+    assert(formattedStates==1);
+    patch.source={10,0,0};assert(numeric.Update(patch.id,patch));
+    patch.slot=2;assert(numeric.Update(patch.id,patch));
+    patch.uv[0]=.5f;assert(numeric.Update(patch.id,patch));
+    numeric.Erase(patch.id);assert(numeric.Update(patch.id,patch));
+    numeric.Clear();assert(numeric.Update(patch.id,patch));
     bool formatted=false;trace.Log([&](auto& out){formatted=true;out<<"INACTIVE";});assert(!formatted);
-    trace.SetFrame(42);assert(trace.Start(directory));const auto first=trace.Path();
+    trace.SetFrame(42);assert(trace.Start(directory));const auto first=trace.Path();const auto firstSession=trace.Session();
     std::vector<std::thread> workers;
     for(int worker=0;worker<4;worker++)workers.emplace_back([&,worker]{for(int i=0;i<250;i++)trace.Log([&](auto& out){out<<"WORKER worker="<<worker<<" item="<<i;});});
     for(auto& worker:workers)worker.join();
@@ -26,6 +37,7 @@ int main(){
     assert(count==1003);
     // Delta logging keeps transitions, suppresses unchanged state, resets per session.
     assert(trace.Start(directory));const auto compact=trace.Path();
+    assert(trace.Session()==firstSession+1);
     for(int i=0;i<1000;i++)trace.LogChanged("tile",[](auto& out){out<<"DRAW_PATCH source=11";});
     trace.LogChanged("tile",[](auto& out){out<<"DRAW_REMOVE";});
     trace.LogChanged("tile",[](auto& out){out<<"DRAW_PATCH source=11";});

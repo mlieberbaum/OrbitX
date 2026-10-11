@@ -12,6 +12,19 @@
 #include <string>
 
 namespace OrbitX::Core {
+// Owned by the calling thread: compare numeric state before constructing log text.
+template<class Key,class State> class TraceStateCache {
+public:
+    bool Update(const Key& key,const State& state){
+        auto it=states.find(key);
+        if(it!=states.end()&&it->second==state)return false;
+        states.insert_or_assign(key,state);return true;
+    }
+    void Erase(const Key& key){states.erase(key);}
+    void Clear(){states.clear();}
+private:
+    std::map<Key,State> states;
+};
 // Livestream deliberately favors a complete, ordered trace over frame rate.
 // All writers (including the DDS worker) serialize through this lock. When idle,
 // the atomic gate prevents formatting, locking and file I/O on the render path.
@@ -19,6 +32,7 @@ class EnvironmentTrace {
 public:
     ~EnvironmentTrace(){Stop("TRACE_DESTROYED");}
     bool Active() const {return active.load(std::memory_order_relaxed);}
+    uint64_t Session() const {return session.load(std::memory_order_relaxed);}
     void SetFrame(uint64_t value){frame.store(value,std::memory_order_relaxed);}
     std::filesystem::path Path() const {std::lock_guard lock(mutex);return path;}
     std::string Error() const {std::lock_guard lock(mutex);return error;}
@@ -36,7 +50,7 @@ public:
             while(std::filesystem::exists(path))path=directory/("Livestream_"+stamp+"_"+std::to_string(++suffix)+".log");
             file.open(path,std::ios::out|std::ios::trunc);
             if(!file){error="Cannot open livestream log";file.clear();return false;}
-            active.store(true);
+            ++session;active.store(true);
             WriteLocked("TRACE_START mode=livestream format=2 detail=changes");
             return active.load();
         }catch(const std::exception& e){error=e.what();return false;}
@@ -98,6 +112,7 @@ private:
     std::map<std::string,std::string> changes;
     std::atomic<bool> active=false;
     std::atomic<uint64_t> frame=0;
+    std::atomic<uint64_t> session=0;
     uint64_t sequence=0;
     std::chrono::steady_clock::time_point started{};
 };

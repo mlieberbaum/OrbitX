@@ -125,13 +125,16 @@ bool Renderer::UpdatePlanet() {
     if(m_trace.Active())previousLeaves=m_planet.leaves;
     m_planet.Select(camera.position.x,camera.position.y,camera.position.z,1737.4,double(m_height)/(2*tanY),resident,
                     [&](Core::PlanetVector center,double radius){return camera.SphereInView(center,radius,tanY,aspect);},m_trace.Active()?&m_trace:nullptr);
-    if(m_trace.Active())for(auto old:previousLeaves)if(std::find(m_planet.leaves.begin(),m_planet.leaves.end(),old)==m_planet.leaves.end()){
-        m_trace.Log([&](auto& out){out<<"LEAF_REMOVE tile="<<old.level<<"/"<<old.row<<"/"<<old.column<<" reason=SELECTION_CHANGED";});
-        auto parent=old;
-        while(parent.level>4){parent=parent.Parent();if(std::find(m_planet.leaves.begin(),m_planet.leaves.end(),parent)!=m_planet.leaves.end()){
-            m_trace.Log([&](auto& out){out<<"TILE_COARSEN old="<<old.level<<"/"<<old.row<<"/"<<old.column
-                <<" parent="<<parent.level<<"/"<<parent.row<<"/"<<parent.column;});break;
-        }}
+    if(m_trace.Active()){
+        const std::set<Core::TileId> currentLeaves(m_planet.leaves.begin(),m_planet.leaves.end());
+        for(auto old:previousLeaves)if(!currentLeaves.contains(old)){
+            m_trace.Log([&](auto& out){out<<"LEAF_REMOVE tile="<<old.level<<"/"<<old.row<<"/"<<old.column<<" reason=SELECTION_CHANGED";});
+            auto parent=old;
+            while(parent.level>4){parent=parent.Parent();if(currentLeaves.contains(parent)){
+                m_trace.Log([&](auto& out){out<<"TILE_COARSEN old="<<old.level<<"/"<<old.row<<"/"<<old.column
+                    <<" parent="<<parent.level<<"/"<<parent.row<<"/"<<parent.column;});break;
+            }}
+        }
     }
     if(m_planet.frozen) {
         std::set<Core::TileId> pending;

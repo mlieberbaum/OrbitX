@@ -109,7 +109,7 @@ private:
         UINT slot{};UINT64 bytes{},touched{},lastDrawFence{},uploadFence{};
         bool ready=false;
     };
-    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; };
+    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; bool operator==(const TileDraw&) const = default; };
     struct PatchMesh {
         Microsoft::WRL::ComPtr<ID3D12Resource> vb,ib;
         D3D12_VERTEX_BUFFER_VIEW vbv{};D3D12_INDEX_BUFFER_VIEW ibv{};UINT count{};
@@ -134,6 +134,9 @@ private:
     std::set<Core::TileId> m_failedTiles;
     std::vector<TileDraw> m_tileDraws;
     std::set<Core::TileId> m_traceDrawIds,m_traceRequestIds;
+    Core::TraceStateCache<Core::TileId,TileDraw> m_traceDrawStates;
+    Core::TraceStateCache<int,std::array<double,11>> m_traceCameraStates;
+    Core::TraceStateCache<int,std::array<float,35>> m_traceMatrixStates;
     double m_selectMs=0,m_uploadCpuMs=0,m_readMs=0,m_presentMs=0,m_sceneGpuMs=0,m_sceneCpuMs=0,m_hudCpuMs=0;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timestampHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_timestampReadback;

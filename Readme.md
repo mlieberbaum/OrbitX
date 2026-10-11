@@ -201,6 +201,10 @@ monotonic elapsed microseconds, followed by one event. DDS-worker events are
 serialized with render-thread events. Timestamp precision does not guarantee that
 all events have distinct timestamps; the sequence number resolves ties.
 
+The top-left HUD shows LAT, LON, ALT, DIST and FOV. ALT is camera distance minus
+the current Moon sphere radius (1737.4 km), displayed in kilometres to one decimal
+place; it is not yet adjusted for terrain elevation.
+
 The format-2 trace includes initial resident/failed/queued/in-flight state,
 camera and matrix changes, inputs/settings, loading/cancellation/results, upload
 submission and activation, actual evictions with reasons and GPU fence values.
@@ -215,7 +219,10 @@ This is a state/event trace, not a screenshot/video capture or an automatic repl
 tool. It does not record every intermediate selection calculation.
 
 Livestream intentionally records synchronously through a thread-safe buffered
-stream. It can substantially reduce FPS and affect asynchronous completion timing;
+stream. Draw, branch, camera and matrix states are compared numerically before
+message formatting or logger locking; unchanged states skip both. Change caches
+reset for each recording, and removed/reappearing patches emit fresh records.
+Recording can still reduce FPS and affect asynchronous completion timing;
 use it for diagnosis, not performance measurement. When inactive, log builders are
 skipped before formatting/locking/I/O. Open/write/flush failures are reported;
 records are never silently dropped from a bounded queue. The completed file has a

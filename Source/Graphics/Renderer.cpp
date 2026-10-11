@@ -599,8 +599,9 @@ void Renderer::DrawHudText(){
    wchar_t buf[96];
    swprintf_s(buf,L"LAT %.2f\u00B0",latitude);draw(buf,left,top+3*line,false);
    swprintf_s(buf,L"LON %.2f\u00B0",longitude);draw(buf,left,top+4*line,false);
-   swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+5*line,false);
-   swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+6*line,false);
+   swprintf_s(buf,L"ALT %.1F KM",double(m_distanceKm)-1737.4);draw(buf,left,top+5*line,false);
+   swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+6*line,false);
+   swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+7*line,false);
    draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
    swprintf_s(buf,L"FPS %.1f",m_fps);draw(buf,(float)m_width-rightPad,top+2*line,true);
    if(m_showFrameGraph)DrawFrameRateGraph();
@@ -634,7 +635,11 @@ void Renderer::Render(){
  if(m_trace.Active()){
    TraceFrameSnapshot();
    SceneCB scene{};memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));
-   m_trace.LogChanged("scene_matrix",[&](auto& out){out<<"SCENE_MATRIX mvp=";for(const auto& row:scene.mvp.m)for(float value:row)out<<value<<",";
+   std::array<float,35> matrixState{};size_t index=0;
+   for(const auto& row:scene.mvp.m)for(float value:row)matrixState[index++]=value;
+   for(const auto& row:scene.model.m)for(float value:row)matrixState[index++]=value;
+   matrixState[index++]=scene.sunDir.x;matrixState[index++]=scene.sunDir.y;matrixState[index++]=scene.sunDir.z;
+   if(m_traceMatrixStates.Update(0,matrixState))m_trace.Log([&](auto& out){out<<"SCENE_MATRIX mvp=";for(const auto& row:scene.mvp.m)for(float value:row)out<<value<<",";
      out<<" model=";for(const auto& row:scene.model.m)for(float value:row)out<<value<<",";
      out<<" sun_dir="<<scene.sunDir.x<<","<<scene.sunDir.y<<","<<scene.sunDir.z;});
  }

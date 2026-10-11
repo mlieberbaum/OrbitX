@@ -31,6 +31,9 @@ public:
     std::set<TileId> nodes;
     std::vector<TileId> leaves, requests;
     std::set<TileId> dependencies; // Traversed ancestors and every child required by the coverage gate.
+    struct BranchTraceState {bool refined;TileId missing;double footprint;bool operator==(const BranchTraceState&) const = default;};
+    TraceStateCache<TileId,BranchTraceState> traceBranches;
+    uint64_t traceSession=0;
     bool frozen=false;
     size_t rejectedFiles=0;
     bool CanEvict(TileId id,bool ready,uint64_t lastDrawFence,uint64_t completed,bool pinned) const {
@@ -57,6 +60,7 @@ public:
     void Select(double cx,double cy,double cz,double radius,double pixelsPerRadian,
                 const std::function<bool(TileId)>& resident,
                 const std::function<bool(PlanetVector,double)>& inView={},EnvironmentTrace* trace=nullptr) {
+        if(trace&&traceSession!=trace->Session()){traceBranches.Clear();traceSession=trace->Session();}
         if(frozen && !leaves.empty()) {
             if(trace)trace->Log([&](auto& out){out<<"SELECTION_FROZEN leaves="<<leaves.size();});
             return;
@@ -90,10 +94,10 @@ public:
                 }
                 // D3D9 principle: render the parent until its child coverage is ready.
                 if(ready){
-                    if(trace)trace->LogChanged("branch/"+std::to_string(id.level)+"/"+std::to_string(id.row)+"/"+std::to_string(id.column),[&](auto& out){out<<"TILE_REFINE tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
+                    if(trace&&traceBranches.Update(id,{true,{},0}))trace->Log([&](auto& out){out<<"TILE_REFINE tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
                     for(int r=0;r<2;r++)for(int c=0;c<2;c++)visit({id.level+1,id.row*2+r,id.column*2+c});return;
                 }
-                if(trace)trace->LogChanged("branch/"+std::to_string(id.level)+"/"+std::to_string(id.row)+"/"+std::to_string(id.column),[&](auto& out){out<<"PARENT_RETAIN tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=CHILD_NOT_READY missing="<<missing.level<<"/"<<missing.row<<"/"<<missing.column<<" footprint="<<footprint;});
+                if(trace&&traceBranches.Update(id,{false,missing,footprint}))trace->Log([&](auto& out){out<<"PARENT_RETAIN tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=CHILD_NOT_READY missing="<<missing.level<<"/"<<missing.row<<"/"<<missing.column<<" footprint="<<footprint;});
             }
             leaves.push_back(id);
         };
