@@ -39,8 +39,6 @@ public:
         std::set<Core::TileId> available;for(const auto& r:ready)available.insert(r.id);
         queue.clear();
         for(const auto& r:requests){
-            if(trace)trace->Log([&](auto& out){out<<"READ_QUERY tile="<<r.id.level<<"/"<<r.id.row<<"/"<<r.id.column
-                <<" ready="<<available.contains(r.id)<<" active="<<(active&&*active==r.id)<<" path=\""<<Core::EnvironmentTrace::Escape(r.path.string())<<"\"";});
             if(!available.contains(r.id)&&(!active||*active!=r.id))queue.push_back(r);
         }
         wake.notify_all();

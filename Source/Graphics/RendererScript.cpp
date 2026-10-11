@@ -54,7 +54,7 @@ void Renderer::DrawScriptPanel(){
     text(m_trace.Active()?L"STOP SCRIPT":L"RUN SCRIPT",l.action.left+24*l.scale,l.action.top+20*l.scale,m_scriptGreen.Get());
 }
 void Renderer::TraceCamera(const char* event){
-    m_trace.Log([&](auto& out){
+    m_trace.LogChanged("camera",[&](auto& out){
         const auto camera=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm);
         out<<event<<" yaw="<<m_yaw<<" pitch="<<m_pitch<<" distance_km="<<m_distanceKm
            <<" altitude_km="<<double(m_distanceKm)-1737.4<<" fov_vertical_deg="<<m_fov
@@ -68,15 +68,25 @@ void Renderer::TraceCamera(const char* event){
 }
 void Renderer::TraceFrameSnapshot(){
     if(!m_trace.Active())return;
-    m_trace.Log([&](auto& out){out<<"CACHE_STATE bytes="<<m_tileBytes<<" capacity=2048 budget_bytes=536870912"
-        <<" entries="<<m_tiles.size()<<" tile_clock="<<m_tileClock<<" draw_fence_completed="<<m_fence->GetCompletedValue()
-        <<" upload_fence_completed="<<m_uploadFence->GetCompletedValue()<<" next_draw_fence="<<m_nextFenceValue+1;});
-    for(const auto& draw:m_tileDraws)m_trace.Log([&](auto& out){out<<"DRAW_PATCH tile="<<draw.id.level<<"/"<<draw.id.row<<"/"<<draw.id.column
-        <<" source="<<draw.source.level<<"/"<<draw.source.row<<"/"<<draw.source.column<<" slot="<<draw.slot<<" grid="<<draw.grid
-        <<" uv="<<draw.uv[0]<<","<<draw.uv[1]<<","<<draw.uv[2]<<","<<draw.uv[3];});
-    for(const auto& id:m_planet.requests)m_trace.Log([&](auto& out){out<<"SELECTED_REQUEST tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
+    std::map<int,size_t> levels;std::set<Core::TileId> draws,requests(m_planet.requests.begin(),m_planet.requests.end());
+    for(const auto& draw:m_tileDraws){
+        ++levels[draw.source.level];draws.insert(draw.id);
+        m_trace.LogChanged("draw/"+std::to_string(draw.id.level)+"/"+std::to_string(draw.id.row)+"/"+std::to_string(draw.id.column),[&](auto& out){out<<"DRAW_PATCH tile="<<draw.id.level<<"/"<<draw.id.row<<"/"<<draw.id.column
+            <<" source="<<draw.source.level<<"/"<<draw.source.row<<"/"<<draw.source.column<<" slot="<<draw.slot<<" grid="<<draw.grid
+            <<" uv="<<draw.uv[0]<<","<<draw.uv[1]<<","<<draw.uv[2]<<","<<draw.uv[3];});
+    }
+    for(auto id:m_traceDrawIds)if(!draws.contains(id))m_trace.LogChanged("draw/"+std::to_string(id.level)+"/"+std::to_string(id.row)+"/"+std::to_string(id.column),[&](auto& out){out<<"DRAW_REMOVE tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
+    for(auto id:requests)if(!m_traceRequestIds.contains(id))m_trace.Log([&](auto& out){out<<"REQUEST_ADD tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
+    for(auto id:m_traceRequestIds)if(!requests.contains(id))m_trace.Log([&](auto& out){out<<"REQUEST_REMOVE tile="<<id.level<<"/"<<id.row<<"/"<<id.column;});
+    m_traceDrawIds=std::move(draws);m_traceRequestIds=std::move(requests);
+    m_trace.Log([&](auto& out){out<<"FRAME_STATE bytes="<<m_tileBytes<<" capacity="<<TileCapacity<<" budget_bytes="<<TileBudget
+        <<" entries="<<m_tiles.size()<<" dependencies="<<m_planet.dependencies.size()<<" requests="<<m_planet.requests.size()
+        <<" patches="<<m_tileDraws.size()<<" tile_clock="<<m_tileClock<<" draw_fence_completed="<<m_fence->GetCompletedValue()
+        <<" upload_fence_completed="<<m_uploadFence->GetCompletedValue()<<" next_draw_fence="<<m_nextFenceValue+1<<" levels=";
+        for(auto [level,count]:levels)out<<level<<":"<<count<<",";});
 }
 void Renderer::StartLivestream(){
+    m_traceDrawIds.clear();m_traceRequestIds.clear();
     m_trace.SetFrame(m_traceFrame);
     if(!m_trace.Start(std::filesystem::path(m_root)/L"Logs")){
         SetError(m_trace.Error());m_scriptStatus=L"Cannot open livestream log";return;

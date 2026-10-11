@@ -103,6 +103,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_cb; UINT8* m_cbPtr{};
 
     static constexpr UINT TileCapacity=8192;
+    static constexpr UINT64 TileBudget=1024ull*1024*1024;
     struct TileResource {
         Microsoft::WRL::ComPtr<ID3D12Resource> texture;
         UINT slot{};UINT64 bytes{},touched{},lastDrawFence{},uploadFence{};
@@ -132,6 +133,7 @@ private:
     std::map<Core::TileId,TileResource> m_tiles;
     std::set<Core::TileId> m_failedTiles;
     std::vector<TileDraw> m_tileDraws;
+    std::set<Core::TileId> m_traceDrawIds,m_traceRequestIds;
     double m_selectMs=0,m_uploadCpuMs=0,m_readMs=0,m_presentMs=0,m_sceneGpuMs=0,m_sceneCpuMs=0,m_hudCpuMs=0;
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timestampHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_timestampReadback;

@@ -24,7 +24,16 @@ int main(){
         const auto elapsed=std::stoll(match[2]);assert(elapsed>=previous);previous=elapsed;++count;
     }
     assert(count==1003);
+    // Delta logging keeps transitions, suppresses unchanged state, resets per session.
+    assert(trace.Start(directory));const auto compact=trace.Path();
+    for(int i=0;i<1000;i++)trace.LogChanged("tile",[](auto& out){out<<"DRAW_PATCH source=11";});
+    trace.LogChanged("tile",[](auto& out){out<<"DRAW_REMOVE";});
+    trace.LogChanged("tile",[](auto& out){out<<"DRAW_PATCH source=11";});
+    trace.Stop("COMPACT_TEST");
+    std::ifstream compactFile(compact);count=0;while(std::getline(compactFile,line))++count;
+    assert(count==5);compactFile.close();
     assert(trace.Start(directory));assert(trace.Path()!=first);
+    trace.LogChanged("tile",[](auto& out){out<<"DRAW_PATCH source=11";});
     PlanetQuadtree original,traced;
     for(int level=4;level<=8;level++)for(int row=0;row<(1<<(level-4));row++)for(int column=0;column<(2<<(level-4));column++){
         TileId id{level,row,column};original.files[id]="tile.dds";original.nodes.insert(id);

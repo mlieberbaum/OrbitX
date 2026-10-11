@@ -8,7 +8,6 @@ using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 namespace OrbitX::Graphics {
 namespace {
-constexpr UINT64 Budget=1024ull*1024*1024;
 D3D12_HEAP_PROPERTIES PlanetHeap(D3D12_HEAP_TYPE type){D3D12_HEAP_PROPERTIES h{};h.Type=type;return h;}
 D3D12_RESOURCE_DESC PlanetBuffer(UINT64 size){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;d.Width=size;d.Height=1;d.DepthOrArraySize=1;d.MipLevels=1;d.SampleDesc.Count=1;d.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;return d;}
 constexpr std::array<UINT,8> Palette={0xFF3030,0x00E5FF,0xFFE600,0xFF39DE,0x32FF57,0xFF8A00,0x4285FF,0xFFFFFF};
@@ -30,13 +29,13 @@ bool Renderer::QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatc
     D3D12_RESOURCE_DESC desc{};desc.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     desc.Width=data.width;desc.Height=data.height;desc.DepthOrArraySize=1;desc.MipLevels=static_cast<UINT16>(data.mips);desc.Format=static_cast<DXGI_FORMAT>(data.format);desc.SampleDesc.Count=1;
     auto allocation=m_device->GetResourceAllocationInfo(0,1,&desc).SizeInBytes;
-    if(allocation==UINT64_MAX || allocation>Budget){m_failedTiles.insert(id);SetError("DDS allocation exceeds cache budget: "+m_planet.files.at(id).string());return false;}
+    if(allocation==UINT64_MAX || allocation>TileBudget){m_failedTiles.insert(id);SetError("DDS allocation exceeds cache budget: "+m_planet.files.at(id).string());return false;}
     std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(data.mips);
     std::vector<UINT> rows(data.mips);std::vector<UINT64> rowSizes(data.mips);UINT64 total=0;
     m_device->GetCopyableFootprints(&desc,0,data.mips,0,footprints.data(),rows.data(),rowSizes.data(),&total);
     total=(total+511)&~UINT64(511);
     if(batch.used+total>batch.capacity) {
-        if(batch.used){m_trace.Log([&](auto& out){out<<"UPLOAD_DEFER tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=PACKET_FULL";});return false;} // Submit this packet first; retry the held result next frame.
+        if(batch.used){m_trace.LogChanged("upload_defer",[&](auto& out){out<<"UPLOAD_DEFER tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=PACKET_FULL";});return false;} // Submit this packet first; retry the held result next frame.
         if(batch.arena)batch.arena->Unmap(0,nullptr);
         batch.arena.Reset();batch.mapped=nullptr;batch.capacity=0;
         auto heap=PlanetHeap(D3D12_HEAP_TYPE_UPLOAD);auto buffer=PlanetBuffer(std::max<UINT64>(16ull*1024*1024,total));
@@ -45,26 +44,23 @@ bool Renderer::QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatc
         }
         batch.capacity=buffer.Width;
     }
-    // Never recycle a descriptor/resource still referenced by either queue.
+    // Keep traversal coverage resident, and never recycle resources referenced by either queue.
     std::set<UINT> pinned;for(const auto& draw:m_tileDraws)pinned.insert(draw.slot);
     auto completed=m_fence->GetCompletedValue();
-    while(m_tileBytes+allocation>Budget || m_tiles.size()>=TileCapacity) {
+    while(m_tileBytes+allocation>TileBudget || m_tiles.size()>=TileCapacity) {
         auto oldest=m_tiles.end();
         for(auto it=m_tiles.begin();it!=m_tiles.end();++it){
-            m_trace.Log([&](auto& out){out<<"EVICTION_QUERY tile="<<it->first.level<<"/"<<it->first.row<<"/"<<it->first.column
-                <<" ready="<<it->second.ready<<" root="<<(it->first.level==4)<<" pinned="<<pinned.contains(it->second.slot)
-                <<" touched="<<it->second.touched<<" last_draw_fence="<<it->second.lastDrawFence<<" draw_fence_completed="<<completed;});
-            if(it->first.level!=4 && it->second.ready && it->second.lastDrawFence<=completed && !pinned.contains(it->second.slot)
+            if(m_planet.CanEvict(it->first,it->second.ready,it->second.lastDrawFence,completed,pinned.contains(it->second.slot))
                && (oldest==m_tiles.end() || it->second.touched<oldest->second.touched))oldest=it;
         }
         if(oldest==m_tiles.end()){
-            m_trace.Log([&](auto& out){out<<"UPLOAD_DEFER tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=NO_SAFE_EVICTION"
-                <<" cache_bytes="<<m_tileBytes<<" incoming_bytes="<<allocation<<" entries="<<m_tiles.size()<<" draw_fence_completed="<<completed;});return false;
+            m_trace.LogChanged("upload_defer",[&](auto& out){out<<"UPLOAD_DEFER tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=NO_SAFE_EVICTION"
+                <<" cache_bytes="<<m_tileBytes<<" incoming_bytes="<<allocation<<" entries="<<m_tiles.size()<<" dependencies="<<m_planet.dependencies.size();});return false;
         }
         m_trace.Log([&](auto& out){out<<"TILE_EVICT tile="<<oldest->first.level<<"/"<<oldest->first.row<<"/"<<oldest->first.column
-            <<" reason="<<(m_tileBytes+allocation>Budget?"CACHE_BYTES":"DESCRIPTOR_CAPACITY")<<" slot="<<oldest->second.slot
+            <<" reason="<<(m_tileBytes+allocation>TileBudget?"CACHE_BYTES":"DESCRIPTOR_CAPACITY")<<" slot="<<oldest->second.slot
             <<" bytes="<<oldest->second.bytes<<" touched="<<oldest->second.touched<<" last_draw_fence="<<oldest->second.lastDrawFence
-            <<" draw_fence_completed="<<completed<<" upload_fence="<<oldest->second.uploadFence<<" pinned=0";});
+            <<" draw_fence_completed="<<completed<<" upload_fence="<<oldest->second.uploadFence<<" pinned=0 dependency=0";});
         m_tileBytes-=oldest->second.bytes;m_tiles.erase(oldest);
     }
     std::set<UINT> used;for(const auto& [key,tile]:m_tiles)used.insert(tile.slot);
@@ -139,7 +135,7 @@ bool Renderer::UpdatePlanet() {
     }
     if(m_planet.frozen) {
         std::set<Core::TileId> pending;
-        for(auto id:m_planet.leaves)for(;;){if(m_planet.files.contains(id)&&!resident(id))pending.insert(id);if(id.level==4)break;id=id.Parent();}
+        for(auto id:m_planet.leaves)for(;;){if(m_planet.files.contains(id)){m_planet.dependencies.insert(id);if(!resident(id))pending.insert(id);}if(id.level==4)break;id=id.Parent();}
         m_planet.requests.assign(pending.begin(),pending.end());
     }
     if(m_deferredTile && std::find(m_planet.requests.begin(),m_planet.requests.end(),m_deferredTile->id)==m_planet.requests.end()){
@@ -158,7 +154,6 @@ bool Renderer::UpdatePlanet() {
     start=std::chrono::steady_clock::now();
     // Three independent packets permit CPU/GPU overlap. No upload queue Wait on the draw path.
     for(auto& batch:m_uploadBatches)if(batch.fence<=m_uploadFence->GetCompletedValue()) {
-        m_trace.Log([&](auto& out){out<<"UPLOAD_PACKET_REUSE previous_fence="<<batch.fence<<" completed_fence="<<m_uploadFence->GetCompletedValue()<<" previous_tiles="<<batch.tiles.size();});
         batch.tiles.clear();batch.used=0;
         if(FAILED(batch.allocator->Reset()) || FAILED(batch.commands->Reset(batch.allocator.Get(),nullptr))){SetError("Tile upload command reset failed");return false;}
         for(UINT attempts=0;attempts<16;attempts++) {
@@ -189,8 +184,6 @@ bool Renderer::UpdatePlanet() {
             if(draw.source.level==4){SetError("No resident DDS root for selected patch");return false;}draw.source=draw.source.Parent();
         }
         auto& tile=m_tiles.at(draw.source);tile.touched=m_tileClock;draw.slot=tile.slot;
-        if(draw.id!=draw.source)m_trace.Log([&](auto& out){out<<"TILE_FALLBACK tile="<<draw.id.level<<"/"<<draw.id.row<<"/"<<draw.id.column
-            <<" source="<<draw.source.level<<"/"<<draw.source.row<<"/"<<draw.source.column;});
         m_renderedLOD=std::max(m_renderedLOD,draw.source.level);
         auto bounds=Core::Bounds(id),sourceBounds=Core::Bounds(draw.source);
         draw.uv[0]=float((bounds.west-sourceBounds.west)/(sourceBounds.east-sourceBounds.west));draw.uv[1]=float((sourceBounds.north-bounds.north)/(sourceBounds.north-sourceBounds.south));
@@ -255,8 +248,6 @@ void Renderer::DrawPlanet() {
             float(b.west*rad),float(b.north*rad),float((b.east-b.west)*rad),float((b.north-b.south)*rad)};
         m_cmd->SetGraphicsRoot32BitConstants(2,16,constants,0);m_cmd->DrawIndexedInstanced(mesh.count,1,0,0,0);
         m_tiles.at(draw.source).lastDrawFence=m_nextFenceValue+1;
-        m_trace.Log([&](auto& out){out<<"DRAW_SUBMIT tile="<<draw.id.level<<"/"<<draw.id.row<<"/"<<draw.id.column
-            <<" source="<<draw.source.level<<"/"<<draw.source.row<<"/"<<draw.source.column<<" draw_fence="<<m_nextFenceValue+1<<" tile_clock="<<m_tileClock;});
     }
 }
 void Renderer::DrawPlanetLabels() {

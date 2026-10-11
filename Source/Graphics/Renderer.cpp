@@ -621,7 +621,7 @@ void Renderer::Update(float){} // Scene constants are written once in Render().
 void Renderer::Render(){
  if(m_traceSession&&!m_trace.Active())StopLivestream("LOG_IO_FAILURE");
  ++m_traceFrame;
- if(m_trace.Active()){m_trace.SetFrame(m_traceFrame);TraceCamera("FRAME_BEGIN");}
+ if(m_trace.Active()){m_trace.SetFrame(m_traceFrame);TraceCamera("CAMERA_STATE");}
  const auto now=std::chrono::steady_clock::now();
  if(m_appState==AppState::Simulation && m_lastFrameStart.time_since_epoch().count())m_frameHistory.AddFrame(std::chrono::duration<double>(now-m_lastFrameStart).count());
  if(m_appState!=AppState::Simulation){m_frameHistory.Clear();m_graphGeometry.Reset();m_graphSampleTime=-1;}
@@ -634,7 +634,7 @@ void Renderer::Render(){
  if(m_trace.Active()){
    TraceFrameSnapshot();
    SceneCB scene{};memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));
-   m_trace.Log([&](auto& out){out<<"SCENE_MATRIX mvp=";for(const auto& row:scene.mvp.m)for(float value:row)out<<value<<",";
+   m_trace.LogChanged("scene_matrix",[&](auto& out){out<<"SCENE_MATRIX mvp=";for(const auto& row:scene.mvp.m)for(float value:row)out<<value<<",";
      out<<" model=";for(const auto& row:scene.model.m)for(float value:row)out<<value<<",";
      out<<" sun_dir="<<scene.sunDir.x<<","<<scene.sunDir.y<<","<<scene.sunDir.z;});
  }

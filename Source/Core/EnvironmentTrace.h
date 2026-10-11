@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iomanip>
 #include <mutex>
+#include <map>
 #include <sstream>
 #include <string>
 
@@ -26,7 +27,7 @@ public:
         if(active.load())return true;
         if(file.is_open())file.close();
         file.clear();
-        error.clear();sequence=0;started=std::chrono::steady_clock::now();
+        error.clear();changes.clear();sequence=0;started=std::chrono::steady_clock::now();
         try {
             std::filesystem::create_directories(directory);
             const auto stamp=Timestamp(std::chrono::system_clock::now(),true);
@@ -36,7 +37,7 @@ public:
             file.open(path,std::ios::out|std::ios::trunc);
             if(!file){error="Cannot open livestream log";file.clear();return false;}
             active.store(true);
-            WriteLocked("TRACE_START mode=livestream format=1");
+            WriteLocked("TRACE_START mode=livestream format=2 detail=changes");
             return active.load();
         }catch(const std::exception& e){error=e.what();return false;}
     }
@@ -58,6 +59,14 @@ public:
     }
     static std::string Escape(const std::string& text){
         std::string result;for(char c:text){if(c=='\n')result+="\\n";else if(c=='\r')result+="\\r";else if(c=='\\')result+="\\\\";else if(c=='\"')result+="\\\"";else result+=c;}return result;
+    }
+    template<class Build> void LogChanged(const std::string& key,Build&& build){
+        if(!Active())return;
+        std::lock_guard lock(mutex);if(!active.load())return;
+        std::ostringstream event;event<<std::setprecision(17);build(event);
+        auto value=event.str();auto it=changes.find(key);
+        if(it!=changes.end()&&it->second==value)return;
+        changes[key]=value;WriteLocked(value);
     }
 private:
     static std::string Timestamp(std::chrono::system_clock::time_point now,bool filename){
@@ -86,6 +95,7 @@ private:
     std::ofstream file;
     std::filesystem::path path;
     std::string error;
+    std::map<std::string,std::string> changes;
     std::atomic<bool> active=false;
     std::atomic<uint64_t> frame=0;
     uint64_t sequence=0;

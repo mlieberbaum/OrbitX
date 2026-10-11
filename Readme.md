@@ -83,7 +83,9 @@ the combined quadtree surface is not limited to that size. BC1, BC2, BC3 and sup
 Malformed/unsupported detail tiles log once and retain DDS ancestor fallback.
 
 The DDS cache has a 1 GiB allocation budget and 8,192 tile descriptor slots; currently
-drawn textures are pinned and other textures are evicted by last use. Mesh and transient uploads are excluded from the reported DDS allocation
+drawn textures and current selection dependencies (ancestors and required siblings)
+are protected. Other textures are evicted by last use, subject to GPU fence safety.
+When no safe victim exists, uploads defer rather than evict required coverage. Mesh and transient uploads are excluded from the reported DDS allocation
 size. The selector uses projected tile size, conservative horizon culling and
 camera-frustum sphere tests. Drawn leaf count means patches
 submitted to DX12, including patches later clipped by the viewport.
@@ -199,14 +201,18 @@ monotonic elapsed microseconds, followed by one event. DDS-worker events are
 serialized with render-thread events. Timestamp precision does not guarantee that
 all events have distinct timestamps; the sequence number resolves ties.
 
-The trace includes initial resident/failed/queued/in-flight state, complete camera
-poses and matrices, inputs/settings, every traversal query and LOD decision,
-requested and selected tiles, actual texture sources and UV ranges, loader queue
-queries/cancellations/results, upload submission and activation, resource eviction
-reasons, cache usage and GPU fence values. Draw records use `level/row/column` IDs
-and preserve the actual source LOD when ancestor fallback is used. Complete per-frame
-coverage can be reconstructed against the same DDS collection. This is an execution
-trace, not a screenshot/video capture or an automatic replay tool.
+The format-2 trace includes initial resident/failed/queued/in-flight state,
+camera and matrix changes, inputs/settings, loading/cancellation/results, upload
+submission and activation, actual evictions with reasons and GPU fence values.
+Draw records use `level/row/column` IDs and include actual texture sources and UV
+ranges. `DRAW_PATCH` updates a patch; `DRAW_REMOVE` removes it. Request changes use
+`REQUEST_ADD`/`REQUEST_REMOVE`. Apply these deltas to reconstruct each frame's
+coverage against the same DDS collection. Branch state changes identify the first
+missing child when coverage is retained. Each frame has compact cache/LOD/fence and
+timing summaries. Unchanged traversal queries, candidate-by-candidate eviction
+scans, repeated draw submissions and repeated camera/matrix snapshots are omitted.
+This is a state/event trace, not a screenshot/video capture or an automatic replay
+tool. It does not record every intermediate selection calculation.
 
 Livestream intentionally records synchronously through a thread-safe buffered
 stream. It can substantially reduce FPS and affect asynchronous completion timing;

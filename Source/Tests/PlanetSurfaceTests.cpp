@@ -48,6 +48,34 @@ int main() {
     auto child=Core::Bounds({5,1,3});assert(child.west==90 && child.east==180 && child.north==0 && child.south==-90);
     assert((Core::TileId{8,7,9}.Parent()==Core::TileId{7,3,4}));
     auto folder=std::filesystem::temp_directory_path()/"orbitx-surface-tests";
+    // Regression: keep traversal dependencies resident under polar cache pressure.
+    {
+    using namespace Core;
+
+ PlanetQuadtree tree;
+ for(int l=4;l<=11;++l)for(int r=0;r<(1<<(l-4));++r)for(int c=0;c<(2<<(l-4));++c){TileId id{l,r,c};tree.files[id]="tile.dds";tree.nodes.insert(id);}
+ auto camera=PlanetCamera::Orbit(.7101706862449646,4.753438949584961,2046.786865234375);
+ auto view=[&](PlanetVector p,double r){return camera.SphereInView(p,r,std::tan(20*PlanetPi/180),3099./1743.);};
+ auto all=[](TileId){return true;};tree.Select(camera.position.x,camera.position.y,camera.position.z,1737.4,1743/(2*std::tan(20*PlanetPi/180)),all,view);
+ auto stable=tree.leaves;auto deps=tree.dependencies;
+ assert(deps.contains({5,0,0})&&deps.contains({5,0,3}));
+ // Every active branch's siblings and ancestors survive despite not being drawn.
+ for(auto id:stable){assert(deps.contains(id));while(id.level>4){id=id.Parent();assert(deps.contains(id));for(int r=0;r<2;++r)for(int c=0;c<2;++c)assert(deps.contains({id.level+1,id.row*2+r,id.column*2+c}));}}
+ for(auto id:deps)assert(!tree.CanEvict(id,true,0,100,false));
+ std::set<TileId> cache=deps;TileId obsolete{11,127,255};assert(!deps.contains(obsolete));cache.insert(obsolete);
+ assert(tree.CanEvict(obsolete,true,0,100,false));assert(!tree.CanEvict(obsolete,false,0,100,false));assert(!tree.CanEvict(obsolete,true,101,100,false));assert(!tree.CanEvict(obsolete,true,0,100,true));
+ // Pressure evicts stale work, never a traversal dependency. All-protected cache defers.
+ auto victim=cache.end();for(auto it=cache.begin();it!=cache.end();++it)if(tree.CanEvict(*it,true,0,100,false)){victim=it;break;}
+ assert(victim!=cache.end()&&*victim==obsolete);cache.erase(victim);
+ for(auto id:cache)assert(!tree.CanEvict(id,true,0,100,false));
+ for(int f=0;f<100;++f){tree.Select(camera.position.x,camera.position.y,camera.position.z,1737.4,1743/(2*std::tan(20*PlanetPi/180)),[&](TileId id){return cache.contains(id);},view);assert(tree.leaves==stable&&tree.requests.empty());}
+ // Moving the camera releases old dependencies, including the problematic level-5 tile.
+ auto pos=PlanetCamera::Orbit(.71,0,1740.);auto smallView=[&](PlanetVector p,double r){return pos.SphereInView(p,r,std::tan(20*PlanetPi/180),3099./1743.);};
+ tree.Select(pos.position.x,pos.position.y,pos.position.z,1737.4,1743/(2*std::tan(20*PlanetPi/180)),all,smallView);
+ size_t released=0;for(auto id:deps)if(tree.CanEvict(id,true,0,100,false))++released;assert(released>0);
+ tree.frozen=true;auto frozen=tree.dependencies;tree.Select(0,0,5000,1737.4,100,all);assert(tree.dependencies==frozen);
+
+    }
     std::filesystem::remove_all(folder);
     std::filesystem::create_directories(folder/"06"/"000001");
     std::ofstream(folder/"06"/"000001"/"000002.dds").put('x');
@@ -101,5 +129,33 @@ int main() {
     assert(Core::SaveDisplayPreferences(prefsPath,{false,true}));prefs=Core::LoadDisplayPreferences(prefsPath);assert(!prefs.fullscreen&&prefs.vsync);
     std::ifstream prefsFile(prefsPath);std::string saved((std::istreambuf_iterator<char>(prefsFile)),{});assert(saved.find("Other=keep")!=std::string::npos);prefsFile.close();
     auto menu=UI::BuildSubmenuLayout(1920,1080);assert(UI::HitTestButton(menu.graphicsVsyncOff,18,150,760,menu.scale,menu.offsetX,menu.offsetY));assert(!menu.graphicsFullscreen.Contains(150,760));
+    // Regression: keep traversal dependencies resident under polar cache pressure.
+    {
+    using namespace Core;
+
+ PlanetQuadtree tree;
+ for(int l=4;l<=11;++l)for(int r=0;r<(1<<(l-4));++r)for(int c=0;c<(2<<(l-4));++c){TileId id{l,r,c};tree.files[id]="tile.dds";tree.nodes.insert(id);}
+ auto camera=PlanetCamera::Orbit(.7101706862449646,4.753438949584961,2046.786865234375);
+ auto view=[&](PlanetVector p,double r){return camera.SphereInView(p,r,std::tan(20*PlanetPi/180),3099./1743.);};
+ auto all=[](TileId){return true;};tree.Select(camera.position.x,camera.position.y,camera.position.z,1737.4,1743/(2*std::tan(20*PlanetPi/180)),all,view);
+ auto stable=tree.leaves;auto deps=tree.dependencies;
+ assert(deps.contains({5,0,0})&&deps.contains({5,0,3}));
+ // Every active branch's siblings and ancestors survive despite not being drawn.
+ for(auto id:stable){assert(deps.contains(id));while(id.level>4){id=id.Parent();assert(deps.contains(id));for(int r=0;r<2;++r)for(int c=0;c<2;++c)assert(deps.contains({id.level+1,id.row*2+r,id.column*2+c}));}}
+ for(auto id:deps)assert(!tree.CanEvict(id,true,0,100,false));
+ std::set<TileId> cache=deps;TileId obsolete{11,127,255};assert(!deps.contains(obsolete));cache.insert(obsolete);
+ assert(tree.CanEvict(obsolete,true,0,100,false));assert(!tree.CanEvict(obsolete,false,0,100,false));assert(!tree.CanEvict(obsolete,true,101,100,false));assert(!tree.CanEvict(obsolete,true,0,100,true));
+ // Pressure evicts stale work, never a traversal dependency. All-protected cache defers.
+ auto victim=cache.end();for(auto it=cache.begin();it!=cache.end();++it)if(tree.CanEvict(*it,true,0,100,false)){victim=it;break;}
+ assert(victim!=cache.end()&&*victim==obsolete);cache.erase(victim);
+ for(auto id:cache)assert(!tree.CanEvict(id,true,0,100,false));
+ for(int f=0;f<100;++f){tree.Select(camera.position.x,camera.position.y,camera.position.z,1737.4,1743/(2*std::tan(20*PlanetPi/180)),[&](TileId id){return cache.contains(id);},view);assert(tree.leaves==stable&&tree.requests.empty());}
+ // Moving the camera releases old dependencies, including the problematic level-5 tile.
+ auto pos=PlanetCamera::Orbit(.71,0,1740.);auto smallView=[&](PlanetVector p,double r){return pos.SphereInView(p,r,std::tan(20*PlanetPi/180),3099./1743.);};
+ tree.Select(pos.position.x,pos.position.y,pos.position.z,1737.4,1743/(2*std::tan(20*PlanetPi/180)),all,smallView);
+ size_t released=0;for(auto id:deps)if(tree.CanEvict(id,true,0,100,false))++released;assert(released>0);
+ tree.frozen=true;auto frozen=tree.dependencies;tree.Select(0,0,5000,1737.4,100,all);assert(tree.dependencies==frozen);
+
+    }
     std::filesystem::remove_all(folder);std::cout<<"Planet surface tests passed\n";
 }
