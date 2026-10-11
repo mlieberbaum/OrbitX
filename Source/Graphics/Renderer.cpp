@@ -587,7 +587,20 @@ void Renderer::DrawHudText(){
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
  }else{
    if(m_tileOverlay)DrawPlanetLabels();
-   constexpr float left=12,rightPad=12,line=22,top=8;draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);wchar_t buf[96];swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+3*line,false);swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+4*line,false);draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
+   constexpr float left=12,rightPad=12,line=22,top=8;
+   draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);
+   const auto position=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm).position;
+   double latitude=std::atan2(position.z,std::hypot(position.x,position.y))*180/Core::PlanetPi;
+   double longitude=std::atan2(position.y,position.x)*180/Core::PlanetPi;
+   // Avoid displaying -0.00 when a coordinate rounds to zero.
+   if(std::abs(latitude)<.005)latitude=0;
+   if(std::abs(longitude)<.005)longitude=0;
+   wchar_t buf[96];
+   swprintf_s(buf,L"LAT %.2f\u00B0",latitude);draw(buf,left,top+3*line,false);
+   swprintf_s(buf,L"LON %.2f\u00B0",longitude);draw(buf,left,top+4*line,false);
+   swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+5*line,false);
+   swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+6*line,false);
+   draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
    swprintf_s(buf,L"FPS %.1f",m_fps);draw(buf,(float)m_width-rightPad,top+2*line,true);
    if(m_showFrameGraph)DrawFrameRateGraph();
 #ifdef PLANET_DEBUG_MODE
