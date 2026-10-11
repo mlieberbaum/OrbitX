@@ -4,13 +4,14 @@
 #include <array>
 
 namespace OrbitX::Core {
+inline constexpr uint64_t RegressionMinimumDwellUs=4000000;
 struct RegressionView {uint64_t timeUs{},endUs{};ScriptCamera camera;};
 inline std::vector<RegressionView> RegressionViews(const CameraScript& script){
     std::vector<RegressionView> views;size_t begin=0;
     for(size_t end=1;end<=script.samples.size();++end){
         if(end<script.samples.size()&&script.samples[end].camera==script.samples[begin].camera)continue;
         const auto& first=script.samples[begin];const auto& last=script.samples[end-1];
-        if(last.timeUs-first.timeUs>=1000000)views.push_back({last.timeUs-100000,last.timeUs,first.camera});
+        if(last.timeUs-first.timeUs>RegressionMinimumDwellUs)views.push_back({last.timeUs-100000,last.timeUs,first.camera});
         begin=end;
     }
     return views;
@@ -54,7 +55,7 @@ public:
             file.open(path,std::ios::out|std::ios::binary);file.imbue(std::locale::classic());
             if(!file){error="Cannot open regression log";return false;}
             active=true;file<<std::setprecision(std::numeric_limits<float>::max_digits10);
-            Line(0);file<<"REGRESSION format=1 body=Moon radius_km=1737.4 policy=stationary_tail minimum_pause_us=1000000 margin_us=100000 stable_checks=4\n";
+            Line(0);file<<"REGRESSION format=1 body=Moon radius_km=1737.4 policy=stationary_tail dwell_policy=2 minimum_pause_us="<<RegressionMinimumDwellUs<<" dwell_comparison=GT margin_us=100000 stable_checks=4\n";
             Line(0);file<<"INPUT script_signature="<<std::hex<<ScriptSignature(script)<<std::dec
                 <<" duration_us="<<script.durationUs<<" viewport="<<script.width<<","<<script.height<<" views="<<views<<" illumination="<<(illuminated?"FULL":"STANDARD")<<'\n';
             Check();return active;

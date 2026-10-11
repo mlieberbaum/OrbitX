@@ -144,7 +144,7 @@ void Renderer::StartCameraPlayback(){
     m_savedFrozenLeaves=m_planet.leaves;m_savedFrozenRequests=m_planet.requests;m_savedFrozenDependencies=m_planet.dependencies;
     if(m_scriptLogging==ScriptLogging::Regression){
         m_regressionViews=Core::RegressionViews(script);
-        if(m_regressionViews.empty()){m_scriptStatus=L"Regression needs stationary pauses of at least 1 second";return;}
+        if(m_regressionViews.empty()){m_scriptStatus=L"Regression needs stationary pauses longer than 4 seconds";return;}
 #ifdef PLANET_DEBUG_MODE
         constexpr bool illuminated=true;
 #else

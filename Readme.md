@@ -292,12 +292,15 @@ capture times come from the saved script, not the frame number or wall clock.
 The UTF-8/ASCII-compatible text has LF newlines and classic-locale round-trip
 float precision, so Beyond Compare can compare the complete files byte-for-byte.
 
-The capture policy finds unchanged camera runs of at least **1 second** and
+The capture policy finds unchanged camera runs lasting **strictly longer than 4 seconds** and
 samples coverage **100 ms before each pause ends**. It does not add checkpoints,
 move/hold the camera, change playback speed, or wait for loading. Five observations
 at 100-ms intervals near each capture test stability; at least four consecutive
 ready, identical camera/scene/selection/draw snapshots are required. The current
-Moon_Camera_Path_Regression_1 script yields **15** comparison views.
+Moon_Camera_Path_Regression_1 script yields **10** comparison views.
+Dwell policy version 2 records the 4,000,000-us threshold and strict greater-than
+comparison in the header. Existing camera scripts require no re-recording; create
+a new baseline because earlier policy logs captured a different set of views.
 
 Only the deterministic drawing inputs/results are recorded: script signature,
 viewport/body/illumination mode, camera, actual scene matrices/sun direction,
