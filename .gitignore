@@ -12,3 +12,6 @@ Runtime/Config/UserPreferences.cfg
 
 # Also protect planetary data if TextureRoot is moved inside the checkout.
 /Textures/
+
+# User-recorded camera scripts.
+Runtime/Scripts/**

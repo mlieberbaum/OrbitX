@@ -178,20 +178,53 @@ wait would justify examining DXGI presentation/frame buffering. Neither change
 is assumed necessary before measuring the new counters.
 
 
-## Environmental livestream recorder
+## Environmental camera scripts and Full logging
 
-Load Moon View normally, then press **Ctrl+R** to toggle the glass script panel.
-The script list currently contains **Manual exploration**. Livestream is selected;
-Benchmark and Regression are disabled placeholders and cannot be run.
-Click **RUN SCRIPT** to begin recording and hide the panel. Camera exploration
-continues with the existing drag and wheel controls. Ctrl+R opens the panel during
-recording with **STOP SCRIPT** as its sole action. Ctrl+R can hide the panel again
-without stopping recording. STOP SCRIPT closes the log and the panel. Scenario
-exit and application shutdown also close the recording cleanly.
+Load Moon View normally, then press **Ctrl+R** to toggle the green glass panel.
+The **Record** tab accepts a script name; **START RECORDING** hides the panel and
+records timestamped camera states while the existing drag/wheel controls work.
+Ctrl+R reopens it without pausing recording. **ADD CHECKPOINT** marks the current
+view; **STOP & SAVE** closes the panel and saves the camera script and diagnostic
+log. Scenario exit and shutdown also save and close an active recording.
 
-Livestream never changes camera position, LOD freeze, overlay, or FPS graph state.
-The panel consumes camera gestures only while open. Benchmark/regression overlay
-save/disable/restore behavior is deferred until those modes are implemented.
+The **Run** tab lists saved `.oxscript` files from **OrbitX/Runtime/Scripts**.
+Click a row to select it; use the mouse wheel to scroll additional scripts.
+**RUN SCRIPT** hides the panel and replays the selected camera path. **Recorded
+timing** applies camera changes at their recorded monotonic elapsed times, with
+no interpolation. **Wait at checkpoints** pauses the logical timeline at each
+marked view until required uploads finish and selected/drawn coverage remains
+unchanged for 250 ms. A 30-second timeout stops playback with a diagnostic event;
+checkpoints with frozen LOD are rejected because they cannot establish fresh
+selection convergence. Mark checkpoints at views you want to compare; a script
+without checkpoints follows recorded timing under either policy.
+
+Logging options are **Benchmark**, **Full**, and **Regression**. Full is the
+existing livestream diagnostic trace; Benchmark and Regression remain disabled.
+Full mode leaves overlays and the FPS graph active according to user settings.
+Playback temporarily owns camera/LOD controls. Ctrl+R can show or hide the panel
+without pausing playback; **STOP SCRIPT** cancels and closes the panel. Completion,
+cancellation, timeout, log failure and scenario exit restore the pre-run camera,
+FOV, LOD-freeze state, overlays and graph. If the original LOD was frozen, its
+selected leaves and dependency state are restored too. Textures remain cached.
+
+Camera scripts are separate from logs. They contain an initial camera state,
+viewport, duration, microsecond-timed state changes, checkpoints and LOD-freeze
+changes. Geographic latitude/longitude/altitude metadata accompanies exact float
+orbit angles, distance and FOV, preserving existing pole-crossing orientation
+without changing the camera math. Initial frozen selection and later transitions
+into frozen LOD carry selected-leaf snapshots. Replays require the recorded
+viewport size; resizing stops an active recording or playback. Script files are
+written on stop via a temporary file and renamed on success, never overwriting
+an existing recording. Names use a start-time suffix; paths and logs are ignored
+by Git. Failed writes are reported. Abrupt termination can lose the in-memory
+camera recording. Format validation caps input size at 64 MiB, duration at 24
+hours, and samples/frozen-leaf records at one million each.
+
+Playback uses the **existing cache**, recorded in the Full log. It reproduces
+camera commands, not the asynchronous read/upload schedule. For comparable cold
+runs, restart OrbitX and use the same scenario, viewport, build and texture set;
+warm replay intentionally benefits from already-cached tiles. Automated
+regression comparison and benchmark measurements will be added separately.
 
 Logs are written to **OrbitX/Runtime/Logs**, using the Visual Studio Runtime working
 directory, e.g. `Livestream_2026-10-10_210445_123456.log`. Filenames use recording
@@ -215,10 +248,11 @@ coverage against the same DDS collection. Branch state changes identify the firs
 missing child when coverage is retained. Each frame has compact cache/LOD/fence and
 timing summaries. Unchanged traversal queries, candidate-by-candidate eviction
 scans, repeated draw submissions and repeated camera/matrix snapshots are omitted.
-This is a state/event trace, not a screenshot/video capture or an automatic replay
-tool. It does not record every intermediate selection calculation.
+This diagnostic log is a state/event trace, not a screenshot/video capture.
+Replay uses the separate camera script, not the diagnostic log; the log does not
+record every intermediate selection calculation.
 
-Livestream intentionally records synchronously through a thread-safe buffered
+Full logging intentionally records synchronously through a thread-safe buffered
 stream. Draw, branch, camera and matrix states are compared numerically before
 message formatting or logger locking; unchanged states skip both. Change caches
 reset for each recording, and removed/reappearing patches emit fresh records.
@@ -227,11 +261,14 @@ use it for diagnosis, not performance measurement. When inactive, log builders a
 skipped before formatting/locking/I/O. Open/write/flush failures are reported;
 records are never silently dropped from a bounded queue. The completed file has a
 `TRACE_STOP` terminal event unless an I/O failure or abrupt process termination
-prevents it. Streamed textures remain cached after stopping; no camera/texture
-pipeline reset is performed.
+prevents it. Streamed textures remain cached after stopping; playback restores the prior
+camera while manual recording leaves the camera where exploration ended.
 
 Portable verification: `Source/Tests/EnvironmentTraceTests.cpp` checks timestamp
 format, event sequencing, concurrent writers, close/restart and failure recovery,
 panel hit regions, and identical traced/untraced quadtree leaves and requests over
 equatorial and polar views. `PlanetSurfaceTests.cpp` remains the existing baseline.
-Windows build, panel appearance and real DDS streaming require local verification.
+`Source/Tests/CameraScriptTests.cpp` checks exact camera round-tripping through
+pole views, frozen-selection snapshots, invalid-file rejection, overwrite
+protection and checkpoint clock behavior. Windows build, panel appearance and
+real DDS streaming require local verification.

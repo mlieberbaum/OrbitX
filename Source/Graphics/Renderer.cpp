@@ -622,7 +622,13 @@ void Renderer::Update(float){} // Scene constants are written once in Render().
 void Renderer::Render(){
  if(m_traceSession&&!m_trace.Active())StopLivestream("LOG_IO_FAILURE");
  ++m_traceFrame;
- if(m_trace.Active()){m_trace.SetFrame(m_traceFrame);TraceCamera("CAMERA_STATE");}
+ if(m_trace.Active())m_trace.SetFrame(m_traceFrame);
+ if(m_scriptOperation==ScriptOperation::Recording){
+   if(m_cameraScript.width!=m_width||m_cameraScript.height!=m_height)StopLivestream("VIEWPORT_CHANGED");
+   else if(m_cameraScript.samples.size()>=999999||std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()-m_scriptClock.start>=24ull*60*60*1000000)StopLivestream("SCRIPT_LIMIT_REACHED");
+ }
+ if(m_scriptOperation==ScriptOperation::Playing)UpdateScriptPlayback();
+ if(m_trace.Active())TraceCamera("CAMERA_STATE");
  const auto now=std::chrono::steady_clock::now();
  if(m_appState==AppState::Simulation && m_lastFrameStart.time_since_epoch().count())m_frameHistory.AddFrame(std::chrono::duration<double>(now-m_lastFrameStart).count());
  if(m_appState!=AppState::Simulation){m_frameHistory.Clear();m_graphGeometry.Reset();m_graphSampleTime=-1;}
@@ -631,6 +637,7 @@ void Renderer::Render(){
  if(elapsed>=0.5){m_fps=m_fpsFrames/elapsed;m_fpsFrames=0;m_fpsStart=now;}
  ++m_fpsFrames;
  if(m_appState==AppState::Simulation && !UpdatePlanet()) return;
+ if(m_scriptOperation==ScriptOperation::Playing)CheckScriptCheckpoint();
  UpdateCB();
  if(m_trace.Active()){
    TraceFrameSnapshot();
@@ -742,10 +749,10 @@ void Renderer::Resize(UINT width,UINT height){
 void Renderer::OnKeyDown(WPARAM k){
  m_trace.Log([&](auto& out){out<<"INPUT_KEY key="<<k<<" ctrl="<<bool(GetKeyState(VK_CONTROL)&0x8000);});
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
-   if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
+   if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;m_scriptNameFocused=false;if(m_scriptPanelOpen&&m_scriptOperation==ScriptOperation::Idle)RefreshScripts();TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
    if(k=='F'){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
    if(k=='O'){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
-   if(k=='L'){m_planet.frozen=!m_planet.frozen;TraceCamera("LOD_FREEZE_TOGGLE");return;}
+   if(k=='L'&&m_scriptOperation!=ScriptOperation::Playing){m_planet.frozen=!m_planet.frozen;TraceCamera("LOD_FREEZE_TOGGLE");return;}
  }
  if(k==VK_ESCAPE){
    // In simulation, Escape exits the active scenario back to the OrbitX main menu.
@@ -760,9 +767,7 @@ void Renderer::OnKeyDown(WPARAM k){
 void Renderer::OnLeftClick(int x,int y){
  m_trace.Log([&](auto& out){out<<"INPUT_LEFT_CLICK x="<<x<<" y="<<y;});
  if(m_appState==AppState::Simulation){
-   if(m_scriptPanelOpen && Core::ScriptPanelLayout::Build(float(m_width),float(m_height)).action.Contains(float(x),float(y))){
-     if(m_trace.Active())StopLivestream("USER_STOP");else StartLivestream();
-   }
+   if(m_scriptPanelOpen)ScriptPanelClick(float(x),float(y));
    return;
  }
  if(m_appState==AppState::MainMenu){
@@ -808,7 +813,7 @@ void Renderer::SetFullscreen(bool enabled){
  if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
 }
 void Renderer::OnMouseDown(int,int){
- if(m_appState!=AppState::Simulation||m_drag||m_scriptPanelOpen)return;
+ if(m_appState!=AppState::Simulation||m_drag||m_scriptPanelOpen||m_scriptOperation==ScriptOperation::Playing)return;
  m_trace.Log([&](auto& out){out<<"INPUT_DRAG_BEGIN";});
  m_drag=true;SetCapture(m_hwnd);ShowCursor(FALSE);
  GetCursorPos(&m_dragAnchorScreen);
@@ -868,7 +873,16 @@ void Renderer::OnMouseMove(int x,int y){
 void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;}}
 
 void Renderer::OnMouseWheel(short d){
- if(m_appState!=AppState::Simulation || m_scriptPanelOpen || (GetKeyState(VK_CONTROL)&0x8000))return;
+ if(m_appState==AppState::Simulation&&m_scriptPanelOpen){
+   if(!m_recordTab&&m_scriptOperation==ScriptOperation::Idle&&!m_savedScripts.empty()){
+     if(d>0&&m_selectedScript>0)--m_selectedScript;
+     if(d<0&&m_selectedScript+1<m_savedScripts.size())++m_selectedScript;
+     if(m_selectedScript<m_scriptListOffset)m_scriptListOffset=m_selectedScript;
+     if(m_selectedScript>=m_scriptListOffset+5)m_scriptListOffset=m_selectedScript-4;
+   }
+   return;
+ }
+ if(m_appState!=AppState::Simulation || m_scriptOperation==ScriptOperation::Playing || (GetKeyState(VK_CONTROL)&0x8000))return;
  m_trace.Log([&](auto& out){out<<"INPUT_WHEEL delta="<<d;});
  m_distanceKm=float(Core::PlanetWheelDistance(m_distanceKm,1737.4,d));
  // Round Orbiter's surface floor upward when storing in float, never beneath the double-precision sphere.
