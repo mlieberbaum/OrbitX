@@ -587,7 +587,8 @@ void Renderer::DrawHudText(){
    }
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
  }else{
-   if(m_tileOverlay)DrawPlanetLabels();
+   if(m_tileOverlayMode>1)DrawPlanetLabels();
+   if(m_tileOverlayMode==3)DrawPlanetCoordinateLabels();
    constexpr float left=12,rightPad=12,line=22,top=8;
    draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);
    const auto position=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm).position;
@@ -750,7 +751,7 @@ void Renderer::OnKeyDown(WPARAM k){
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
    if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;m_scriptNameFocused=false;if(m_scriptPanelOpen&&m_scriptOperation==ScriptOperation::Idle)RefreshScripts();TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
    if(k=='F'&&!(m_scriptOperation==ScriptOperation::Playing&&m_scriptLogging==ScriptLogging::Benchmark)){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
-   if(k=='O'&&!(m_scriptOperation==ScriptOperation::Playing&&m_scriptLogging==ScriptLogging::Benchmark)){m_tileOverlay=!m_tileOverlay;m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
+   if(k=='O'&&!(m_scriptOperation==ScriptOperation::Playing&&m_scriptLogging==ScriptLogging::Benchmark)){m_tileOverlayMode=Core::NextTileOverlayMode(m_tileOverlayMode);m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
    if(k=='L'&&m_scriptOperation!=ScriptOperation::Playing){m_planet.frozen=!m_planet.frozen;TraceCamera("LOD_FREEZE_TOGGLE");return;}
  }
  if(k==VK_ESCAPE){

@@ -57,7 +57,7 @@ private:
 };
 // Called only after a run stops. No file I/O in loading/measurement windows.
 inline bool SaveSnapshotPerformance(const std::filesystem::path& directory,const CameraScript& script,
-    const std::vector<SnapshotResult>& results,const std::vector<ScriptFrameBucket>& wholeRun,const char* mode,bool overlay,bool graph,bool vsync,
+    const std::vector<SnapshotResult>& results,const std::vector<ScriptFrameBucket>& wholeRun,const char* mode,unsigned overlayMode,bool graph,bool vsync,
     const char* reason,std::filesystem::path& path,std::string& error){
     try{
         std::filesystem::create_directories(directory);unsigned index=1;
@@ -65,7 +65,7 @@ inline bool SaveSnapshotPerformance(const std::filesystem::path& directory,const
         std::ofstream out(path,std::ios::binary);out.imbue(std::locale::classic());out<<std::setprecision(12);
         out<<"# OrbitX snapshot performance format=1 mode="<<mode<<" signature="<<std::hex<<ScriptSignature(script)<<std::dec
            <<" viewport="<<script.width<<","<<script.height<<" cache=ROOT_ONLY os_disk_cache=UNCONTROLLED steady_us="<<SnapshotSteadyUs
-           <<" hold_us="<<SnapshotHoldUs<<" bucket_target_us="<<SnapshotBucketUs<<" overlay="<<overlay<<" graph="<<graph<<" vsync="<<vsync<<" reason="<<reason<<'\n';
+           <<" hold_us="<<SnapshotHoldUs<<" bucket_target_us="<<SnapshotBucketUs<<" overlay="<<(overlayMode>1)<<" overlay_mode="<<overlayMode<<" graph="<<graph<<" vsync="<<vsync<<" reason="<<reason<<'\n';
         out<<"view,status,loading_us,measurement_us,frames,mean_fps\n";
         for(size_t i=0;i<results.size();++i){const auto& r=results[i];out<<i<<','<<r.status<<','<<r.loadingUs<<','<<r.measurementUs<<','<<r.frames<<','<<(r.measurementUs?double(r.frames)*1.e6/r.measurementUs:0)<<'\n';}
         out<<"view,bucket,end_us,duration_us,frames,fps\n";

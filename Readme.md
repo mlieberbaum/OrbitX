@@ -37,10 +37,19 @@ Launch **Moon View**, then use:
 
 | Control | Action |
 | --- | --- |
-| Ctrl+O | Toggle 16% tile tint, thin boundaries, and colored center LOD numbers together (default off) |
+| Ctrl+O | Cycle overlay modes: 1 off (default), 2 tint/boundaries/LOD, 3 adds edge latitude/longitude |
 | Ctrl+L | Freeze/unfreeze selected leaf set; camera still moves |
 | Right drag / wheel | Camera rotation / Orbiter planetary wheel zoom |
 | Ctrl+F | Toggle the transparent FPS history graph (default on) |
+
+Ctrl+O cycles **1 → 2 → 3 → 1**. Mode 1 has no tile overlays. Mode 2
+retains the existing 16% tint, boundaries and colored center LOD numbers. Mode 3
+adds latitude labels at north/south edge midpoints and longitude labels
+at west/east edge midpoints, using **X.XX° N/S/E/W** (two decimals, no minus signs). The
+northernmost and southernmost rows at each level omit coordinate labels; their
+mode-2 overlays remain visible. Only visible surface points are labeled and
+shared edge midpoints are drawn once. Coordinate text layouts are cached across
+frames and unused entries are discarded. Modes 1/2 do no coordinate-label work.
 
 Ctrl+I has no action. Center numbers identify each selected patch's geometry LOD
 and use the same color as its tint and boundaries. Centers behind the lunar limb
@@ -217,7 +226,8 @@ or **Full**, then **RUN SCRIPT**. The panel closes. Each view:
    100-ms buckets. Bucket durations are actual elapsed time, not assumed 100 ms;
    the final frame can extend the window slightly. Coverage changes mark UNSTABLE.
 
-Only **Benchmark** hides overlays/FPS graph and restores their previous states.
+Only **Benchmark** selects overlay mode 1 and hides the FPS graph, then restores
+the exact original overlay mode (1/2/3) and graph state.
 Regression and Full preserve them; their settings are recorded. Reopening the
 panel or changing overlay/graph settings during a run invalidates results as
 SETTINGS_CHANGED because measurement conditions changed. Ctrl+R still works;
@@ -274,3 +284,8 @@ actual-duration buckets, worker reset, tracing and the existing surface baseline
 Windows Visual Studio/HLSL/DX12 execution and panel appearance require local tests.
 All four Visual Studio configurations retain multi-processor compilation (`/MP`).
 
+
+Overlay mode is included in Full, Regression and Performance output. Canonical
+regression format 3 adds `overlay_mode` to distinguish all three modes; establish
+a new baseline after this update. Changing between modes 2/3 during a script run
+invalidates measurements just like other changes in display conditions.

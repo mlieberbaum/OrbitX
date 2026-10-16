@@ -29,7 +29,7 @@ int main(){
     const auto directory=std::filesystem::temp_directory_path()/("orbitx-snapshot-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     CameraScript script;script.width=10;script.height=10;script.views={{0,0,1800,40,false}};
     std::filesystem::path path;std::string error;
-    assert(SaveSnapshotPerformance(directory,script,{run.Result()},{},"BENCHMARK",false,false,false,"USER_STOP",path,error));assert(std::filesystem::file_size(path)>100);
+    assert(SaveSnapshotPerformance(directory,script,{run.Result()},{},"BENCHMARK",1,false,false,"USER_STOP",path,error));assert(std::filesystem::file_size(path)>100);
     // All writers share the one directory reserved at script start. Identical
     // timestamps get separate directories; None performs no filesystem writes.
     ScriptSession session,collision,none;const auto when=std::chrono::system_clock::time_point(std::chrono::microseconds(1234567890123456));
@@ -41,7 +41,7 @@ int main(){
     EnvironmentTrace trace;RegressionLog regression;
     assert(trace.Start(session.directory));assert(regression.Start(session.directory,script,1,true));
     regression.View(0,SnapshotRegressionView(0,script.views[0]),{},"READY");regression.Stop(SnapshotHoldUs,"SCRIPT_COMPLETE");trace.Stop("SCRIPT_COMPLETE");
-    assert(SaveSnapshotPerformance(session.directory,script,{run.Result()},{},"FULL",false,false,false,"SCRIPT_COMPLETE",path,error));
+    assert(SaveSnapshotPerformance(session.directory,script,{run.Result()},{},"FULL",1,false,false,"SCRIPT_COMPLETE",path,error));
     assert(path.parent_path()==session.directory&&trace.Path().parent_path()==session.directory&&regression.Path().parent_path()==session.directory);
     size_t files=0;for(const auto& entry:std::filesystem::directory_iterator(session.directory))if(entry.is_regular_file())++files;assert(files==3);
     {std::ofstream blocked(directory/"blocked");blocked<<"file";}

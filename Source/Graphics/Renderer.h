@@ -24,6 +24,7 @@
 #include "../Core/CameraScript.h"
 #include "../Core/SnapshotRun.h"
 #include "../Core/ScriptSession.h"
+#include "../Core/TileOverlay.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -63,6 +64,7 @@ private:
     void DrawPlanet();
     void DrawPlanetTelemetry(float x,float y);
     void DrawPlanetLabels();
+    void DrawPlanetCoordinateLabels();
     void DrawScriptPanel();
     void RefreshScripts();
     void ScriptPanelClick(float x,float y);
@@ -88,7 +90,8 @@ private:
     uint64_t m_nextSnapshotCheckUs=0;
     Core::RegressionSnapshot m_previousRegressionSnapshot;
     bool m_runInvalid=false;
-    bool m_runOverlay=false,m_runGraph=false,m_runVsync=false;
+    unsigned m_runOverlayMode=1;
+    bool m_runGraph=false,m_runVsync=false;
     void ApplyScriptCamera(const Core::ScriptCamera& camera);
     Core::ScriptCamera CurrentScriptCamera() const;
     void FinishCameraScript(const char* reason);
@@ -102,7 +105,8 @@ private:
     Core::ScriptCamera m_savedCamera;
     std::vector<Core::TileId> m_savedFrozenLeaves,m_savedFrozenRequests;
     std::set<Core::TileId> m_savedFrozenDependencies;
-    bool m_savedOverlay=false,m_savedGraph=false;
+    unsigned m_savedOverlayMode=1;
+    bool m_savedGraph=false;
     void StartLivestream();
     void StopLivestream(const char* reason);
     void TraceCamera(const char* event);
@@ -115,6 +119,12 @@ private:
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_scriptGreen,m_scriptGlass,m_scriptWhite,m_scriptDisabled;
     std::array<Microsoft::WRL::ComPtr<IDWriteTextLayout>,20> m_tileLabelLayouts;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_tileLabelBrush;
+    struct CoordinateLabel {
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        DWRITE_TEXT_METRICS metrics{};
+        uint64_t used=0;
+    };
+    std::map<std::pair<bool,double>,CoordinateLabel> m_coordinateLabels;
     void DrawFrameRateGraph();
     void DrawCachedHudText(const std::wstring& text,float x,float y,bool right,float maxWidth=0);
     struct HudText {
@@ -185,7 +195,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_timestampReadback;
     UINT64 m_timestampFrequency=0;
     bool m_hasTimestamp[FrameCount]{};
-    bool m_tileOverlay=false;
+    unsigned m_tileOverlayMode=1;
     UINT64 m_tileClock=0,m_tileBytes=0;
     UINT m_srvStride{};
     int m_renderedLOD=0,m_residentLOD=0;

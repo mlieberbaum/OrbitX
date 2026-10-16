@@ -149,7 +149,7 @@ void Renderer::StartCameraPlayback(){
     if(!Core::CameraScript::Load(m_savedScripts[m_selectedScript],script,error)){SetError(error);m_scriptStatus=L"Cannot load script / recreate old paths with TAKE SNAPSHOT";return;}
     if(script.width!=m_width||script.height!=m_height){m_scriptStatus=L"Match recorded viewport: "+std::to_wstring(script.width)+L" x "+std::to_wstring(script.height);return;}
     if(!m_scriptSession.Begin(std::filesystem::path(m_root)/L"Logs",true,error)){SetError(error);m_scriptStatus=L"Cannot create script log folder";return;}
-    OnMouseUp();m_savedCamera=CurrentScriptCamera();m_savedOverlay=m_tileOverlay;m_savedGraph=m_showFrameGraph;
+    OnMouseUp();m_savedCamera=CurrentScriptCamera();m_savedOverlayMode=m_tileOverlayMode;m_savedGraph=m_showFrameGraph;
     m_savedFrozenLeaves=m_planet.leaves;m_savedFrozenRequests=m_planet.requests;m_savedFrozenDependencies=m_planet.dependencies;
     if(m_scriptLogging==ScriptLogging::Regression||m_scriptLogging==ScriptLogging::Full){
 #ifdef PLANET_DEBUG_MODE
@@ -157,7 +157,7 @@ void Renderer::StartCameraPlayback(){
 #else
         constexpr bool illuminated=false;
 #endif
-        if(!m_regressionLog.Start(m_scriptSession.directory,script,script.views.size(),illuminated,m_tileOverlay,m_showFrameGraph,m_vsync)){
+        if(!m_regressionLog.Start(m_scriptSession.directory,script,script.views.size(),illuminated,m_tileOverlayMode,m_showFrameGraph,m_vsync)){
             SetError(m_regressionLog.Error());m_scriptStatus=L"Cannot open regression log";return;
         }
         m_regressionSession=true;
@@ -167,8 +167,8 @@ void Renderer::StartCameraPlayback(){
         if(!m_trace.Active()){
             m_regressionLog.Stop(0,"START_FAILED");m_regressionSession=false;m_trace.Stop("START_FAILED");m_traceSession=false;return;
         }
-    }else if(m_scriptLogging==ScriptLogging::Benchmark){m_tileOverlay=false;m_showFrameGraph=false;m_telemetryText.clear();}
-    m_runOverlay=m_tileOverlay;m_runGraph=m_showFrameGraph;m_runVsync=m_vsync;
+    }else if(m_scriptLogging==ScriptLogging::Benchmark){m_tileOverlayMode=1;m_showFrameGraph=false;m_telemetryText.clear();}
+    m_runOverlayMode=m_tileOverlayMode;m_runGraph=m_showFrameGraph;m_runVsync=m_vsync;
     m_cameraScript=std::move(script);m_currentView=0;m_beginSnapshot=true;m_snapshotResults.clear();m_snapshotResults.reserve(m_cameraScript.views.size());m_runInvalid=false;
     m_scriptFrames.Begin(ScriptNow());
     m_scriptOperation=ScriptOperation::Playing;m_scriptPanelOpen=false;m_scriptHover=-1;
@@ -226,7 +226,7 @@ Core::RegressionSnapshot Renderer::RegressionSnapshot()const{
 }
 void Renderer::CaptureRegression(){
     const auto now=ScriptNow();m_snapshotChanged=false;
-    if(m_tileOverlay!=m_runOverlay||m_showFrameGraph!=m_runGraph||m_vsync!=m_runVsync||m_scriptPanelOpen)m_runInvalid=true;
+    if(m_tileOverlayMode!=m_runOverlayMode||m_showFrameGraph!=m_runGraph||m_vsync!=m_runVsync||m_scriptPanelOpen)m_runInvalid=true;
     if(now<m_nextSnapshotCheckUs||(m_scriptLogging==ScriptLogging::Benchmark&&m_snapshotRun.State()==Core::SnapshotRun::Phase::Measuring)){
         // Cheap continuous coverage checks between the 10-Hz full integrity checks.
         if(!m_planet.requests.empty())m_snapshotReady=false;
@@ -260,7 +260,7 @@ void Renderer::CaptureRegression(){
     }
     m_snapshotChanged=!m_haveSnapshot||snapshot!=m_previousRegressionSnapshot;
     m_snapshotReady=std::string(status)=="READY";
-    if(m_tileOverlay!=m_runOverlay||m_showFrameGraph!=m_runGraph||m_vsync!=m_runVsync||m_scriptPanelOpen)m_runInvalid=true;
+    if(m_tileOverlayMode!=m_runOverlayMode||m_showFrameGraph!=m_runGraph||m_vsync!=m_runVsync||m_scriptPanelOpen)m_runInvalid=true;
     m_previousRegressionSnapshot=std::move(snapshot);m_haveSnapshot=true;
 }
 void Renderer::CompleteScriptFrame(){
@@ -287,14 +287,14 @@ void Renderer::FinishCameraScript(const char* reason){
     }else if(operation==ScriptOperation::Playing){
         ApplyScriptCamera(m_savedCamera);
         if(m_savedCamera.frozen){m_planet.leaves=std::move(m_savedFrozenLeaves);m_planet.requests=std::move(m_savedFrozenRequests);m_planet.dependencies=std::move(m_savedFrozenDependencies);}
-        if(m_scriptLogging==ScriptLogging::Benchmark){m_tileOverlay=m_savedOverlay;m_showFrameGraph=m_savedGraph;}m_telemetryText.clear();
+        if(m_scriptLogging==ScriptLogging::Benchmark){m_tileOverlayMode=m_savedOverlayMode;m_showFrameGraph=m_savedGraph;}m_telemetryText.clear();
         const std::string why=reason;m_scriptStatus=why=="SCRIPT_COMPLETE"?L"Playback complete / original view restored":L"Playback stopped / original view restored";
         if(why=="VIEWPORT_CHANGED")m_scriptStatus=L"Viewport changed / playback stopped";
     }
 }
 void Renderer::TraceCamera(const char* event){
     if(!m_trace.Active())return;
-    const std::array<double,11> state={double(m_yaw),double(m_pitch),double(m_distanceKm),double(m_fov),double(m_width),double(m_height),double(m_tileOverlay),double(m_showFrameGraph),double(m_planet.frozen),double(m_vsync),double(m_scriptPanelOpen)};
+    const std::array<double,11> state={double(m_yaw),double(m_pitch),double(m_distanceKm),double(m_fov),double(m_width),double(m_height),double(m_tileOverlayMode),double(m_showFrameGraph),double(m_planet.frozen),double(m_vsync),double(m_scriptPanelOpen)};
     const bool changed=m_traceCameraStates.Update(0,state);
     if(!changed&&(std::string(event)=="CAMERA_STATE"||std::string(event)=="SCRIPT_CAMERA"))return;
     m_trace.Log([&](auto& out){
@@ -305,7 +305,7 @@ void Renderer::TraceCamera(const char* event){
            <<" lon_deg="<<std::atan2(camera.position.y,camera.position.x)*180/Core::PlanetPi
            <<" position="<<camera.position.x<<","<<camera.position.y<<","<<camera.position.z
            <<" up="<<camera.up.x<<","<<camera.up.y<<","<<camera.up.z
-           <<" viewport="<<m_width<<","<<m_height<<" overlay="<<m_tileOverlay<<" graph="<<m_showFrameGraph
+           <<" viewport="<<m_width<<","<<m_height<<" overlay="<<(m_tileOverlayMode>1)<<" overlay_mode="<<m_tileOverlayMode<<" graph="<<m_showFrameGraph
            <<" frozen="<<m_planet.frozen<<" vsync="<<m_vsync<<" panel="<<m_scriptPanelOpen;
     });
 }
@@ -372,7 +372,7 @@ void Renderer::StopLivestream(const char* reason){
         if(!complete&&!m_beginSnapshot){auto partial=m_snapshotRun.Result();partial.status="CANCELLED";m_snapshotResults.push_back(std::move(partial));}
         m_scriptFrames.Finish(ScriptNow());
         const char* mode=m_scriptLogging==ScriptLogging::Benchmark?"BENCHMARK":m_scriptLogging==ScriptLogging::Regression?"REGRESSION":"FULL";
-        Core::SaveSnapshotPerformance(m_scriptSession.directory,m_cameraScript,m_snapshotResults,m_scriptFrames.Buckets(),mode,m_runOverlay,m_runGraph,m_runVsync,reason,performancePath,performanceError);
+        Core::SaveSnapshotPerformance(m_scriptSession.directory,m_cameraScript,m_snapshotResults,m_scriptFrames.Buckets(),mode,m_runOverlayMode,m_runGraph,m_runVsync,reason,performancePath,performanceError);
     }
     bool validRegression=false;
     if(regression){

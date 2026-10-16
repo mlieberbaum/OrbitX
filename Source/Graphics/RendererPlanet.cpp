@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iomanip>
 #include <sstream>
+#include <tuple>
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
 namespace OrbitX::Graphics {
@@ -247,7 +248,7 @@ void Renderer::DrawPlanet() {
         auto color=Palette[(draw.id.level-1)%Palette.size()];auto b=Core::Bounds(draw.id);double rad=Core::PlanetPi/180;
         double step=(b.north-b.south)*rad/(128u>>draw.grid);
         float constants[16]={draw.uv[0],draw.uv[1],draw.uv[2],draw.uv[3],float((color>>16)&255)/255,float((color>>8)&255)/255,float(color&255)/255,1,
-            m_tileOverlay?1.f:0.f,m_tileOverlay?1.f:0.f,float(std::max(1e-6,1-std::cos(step))+1e-5),0,
+            m_tileOverlayMode>1?1.f:0.f,m_tileOverlayMode>1?1.f:0.f,float(std::max(1e-6,1-std::cos(step))+1e-5),0,
             float(b.west*rad),float(b.north*rad),float((b.east-b.west)*rad),float((b.north-b.south)*rad)};
         m_cmd->SetGraphicsRoot32BitConstants(2,16,constants,0);m_cmd->DrawIndexedInstanced(mesh.count,1,0,0,0);
         m_tiles.at(draw.source).lastDrawFence=m_nextFenceValue+1;
@@ -284,6 +285,43 @@ void Renderer::DrawPlanetLabels() {
         m_d2dContext->DrawTextLayout(D2D1::Point2F(x,y),layout.Get(),m_tileLabelBrush.Get());
     }
 }
+void Renderer::DrawPlanetCoordinateLabels() {
+    // Overlay-only: project edge positions with the exact current scene matrix.
+    SceneCB scene{};std::memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));
+    const auto transform=XMMatrixTranspose(XMLoadFloat4x4(&scene.mvp));
+    const auto camera=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm);
+    if(!m_tileLabelBrush && FAILED(m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(0,0,0),&m_tileLabelBrush)))return;
+    std::set<std::tuple<bool,double,double>> placed;
+    for(const auto& draw:m_tileDraws){
+        if(!Core::HasTileEdgeCoordinates(draw.id))continue;
+        for(const auto edge:Core::TileEdgeCoordinates(draw.id)){
+            const auto normal=Core::SurfaceDirection(edge.latitude*Core::PlanetPi/180,edge.longitude*Core::PlanetPi/180);
+            if(Core::Dot(normal,camera.position-normal*1737.4)<=0)continue;
+            XMFLOAT4 clip{};XMStoreFloat4(&clip,XMVector4Transform(XMVectorSet(float(normal.x),float(normal.y),float(normal.z),1),transform));
+            if(clip.w<=0 || clip.z<0 || clip.z>clip.w || std::abs(clip.x)>clip.w || std::abs(clip.y)>clip.w)continue;
+            // Matching neighboring tiles share the edge midpoint. Draw it once,
+            // including the -180/+180 wrap, instead of stacking identical text.
+            const double longitude=edge.longitude==180?-180:edge.longitude;
+            if(!placed.emplace(edge.isLatitude,edge.latitude,longitude).second)continue;
+            auto& cached=m_coordinateLabels[{edge.isLatitude,edge.Value()}];cached.used=m_tileClock;
+            if(!cached.layout){
+                const auto text=Core::TileCoordinateText(edge);
+                if(FAILED(m_dwriteFactory->CreateTextLayout(text.c_str(),static_cast<UINT32>(text.size()),m_textLeft.Get(),240,40,&cached.layout))){m_coordinateLabels.erase({edge.isLatitude,edge.Value()});continue;}
+                cached.layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);cached.layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+                if(FAILED(cached.layout->GetMetrics(&cached.metrics))){m_coordinateLabels.erase({edge.isLatitude,edge.Value()});continue;}
+            }
+            const auto& metrics=cached.metrics;
+            const float x=(clip.x/clip.w+1)*.5f*float(m_width)-metrics.width*.5f-metrics.left;
+            const float y=(1-clip.y/clip.w)*.5f*float(m_height)-metrics.height*.5f-metrics.top;
+            m_tileLabelBrush->SetColor(D2D1::ColorF(0,0,0));
+            m_d2dContext->DrawTextLayout(D2D1::Point2F(x+1,y+1),cached.layout.Get(),m_tileLabelBrush.Get());
+            m_tileLabelBrush->SetColor(D2D1::ColorF(.9f,.98f,.94f));
+            m_d2dContext->DrawTextLayout(D2D1::Point2F(x,y),cached.layout.Get(),m_tileLabelBrush.Get());
+        }
+    }
+    // Keep only visible values, reusing their text layouts across steady frames.
+    for(auto it=m_coordinateLabels.begin();it!=m_coordinateLabels.end();)if(it->second.used!=m_tileClock)it=m_coordinateLabels.erase(it);else ++it;
+}
 void Renderer::DrawPlanetTelemetry(float x,float y) {
     auto now=std::chrono::steady_clock::now();
     if(m_telemetryText.empty()||now-m_telemetryTime>=std::chrono::milliseconds(100)){
@@ -298,10 +336,10 @@ void Renderer::DrawPlanetTelemetry(float x,float y) {
             <<L"\nRead (worker) "<<m_readMs<<L" ms  Scene GPU "<<m_sceneGpuMs<<L" ms"
             <<L"\nScene CPU "<<m_sceneCpuMs<<L" ms  HUD CPU "<<m_hudCpuMs<<L" ms"
             <<L"\nPresent / frame wait "<<m_presentMs<<L" ms  VSync "<<(m_vsync?L"ON":L"OFF")
-            <<L"\nTile overlay "<<(m_tileOverlay?L"ON":L"OFF")<<L"\nLOD frozen "<<(m_planet.frozen?L"YES":L"NO")
-            <<L"\nCtrl+O tint / edges / LOD  Ctrl+L freeze  Ctrl+F FPS graph";
+            <<L"\nTile overlay mode "<<m_tileOverlayMode<<L" / 3 "<<(m_tileOverlayMode==1?L"OFF":m_tileOverlayMode==2?L"TILES":L"TILES + COORDINATES")<<L"\nLOD frozen "<<(m_planet.frozen?L"YES":L"NO")
+            <<L"\nCtrl+O cycle overlay 1 / 2 / 3  Ctrl+L freeze  Ctrl+F FPS graph";
         if(!m_tileStatus.empty())text<<L"\n"<<m_tileStatus;
-        if(m_tileOverlay) {
+        if(m_tileOverlayMode>1) {
             auto camera=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm);
             double lat=std::asin(camera.position.z/m_distanceKm)*180/Core::PlanetPi,lon=std::atan2(camera.position.y,camera.position.x)*180/Core::PlanetPi;
             for(const auto& draw:m_tileDraws){auto b=Core::Bounds(draw.id);if(lat>=b.south&&lat<=b.north&&lon>=b.west&&lon<=b.east){

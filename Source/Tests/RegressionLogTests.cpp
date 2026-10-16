@@ -29,6 +29,8 @@ int main(){
     changed=snapshot;changed.draws[0].grid=2;assert(write(changed)!=baseline);
     changed=snapshot;changed.draws[0].indexCount=42;assert(write(changed)!=baseline);
     changed=snapshot;changed.scene[0]=.99f;assert(write(changed)!=baseline);
+    assert(log.Start(root,script,views.size(),true,3));const auto mode3=log.Path();log.Stop(0,"USER_STOP");
+    assert(Read(mode3).find("overlay_mode=3")!=std::string::npos);
     const auto failed=write(snapshot,"PENDING");assert(failed.find("RESULT status=INVALID")!=std::string::npos&&failed!=baseline);
     assert(baseline.find("RESULT status=COMPLETE")!=std::string::npos);
     for(const auto* excluded:{"frame=","seq=","slot=","fence=","cpu=","2026-","Livestream_"})assert(baseline.find(excluded)==std::string::npos);
