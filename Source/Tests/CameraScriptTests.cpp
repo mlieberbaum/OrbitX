@@ -30,7 +30,12 @@ int main(){
     }
     for(auto [w,h]:{std::pair{3840.f,2160.f},std::pair{1280.f,720.f},std::pair{320.f,180.f}}){
         auto l=ScriptPanelLayout::Build(w,h);assert(l.panel.left>=0&&l.panel.top>=0&&l.panel.right<=w&&l.panel.bottom<=h);
+        const auto record=ScriptPanelLayout::Build(w,h,true);
+        assert(record.none.right<=record.panel.right&&record.none.left>record.regression.right);
+        assert(record.none.Contains((record.none.left+record.none.right)/2,(record.none.top+record.none.bottom)/2));
+        assert(record.benchmark.right<record.livestream.left&&record.livestream.right<record.regression.left);
         assert(!l.action.Contains(l.snapshot.left,l.snapshot.top));assert(!l.recordTab.Contains(l.runTab.left,l.runTab.top));
     }
     std::filesystem::remove_all(directory);std::cout<<"Snapshot camera script tests passed\n";
 }
+

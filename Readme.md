@@ -184,7 +184,10 @@ Load Moon View normally and use **Ctrl+R** to toggle the green glass panel.
 On **Record**, name a script and click **START RECORDING**. No camera samples are
 captured automatically. Position the camera, reopen the panel, and click
 **TAKE SNAPSHOT** for each desired view. The panel confirms the capture and shows
-its count. Ctrl+R hides it for the next camera movement. **STOP & SAVE** writes
+its count. Ctrl+R hides it for the next camera movement. On Record, **Full**
+keeps the manual diagnostic trace; **None** saves only the snapshot script with
+no logging or log folder. Benchmark/Regression remain disabled while recording.
+None is absent from Run; switching from None to Run selects Full. **STOP & SAVE** writes
 ordered views into `Runtime/Scripts`; recording also saves on scenario exit or
 shutdown. LOD must be unfrozen when starting or capturing. Existing mouse controls
 and camera orientation, including continuous pole crossings, are unchanged.
@@ -224,7 +227,12 @@ freeze state (including frozen leaves/dependencies). The test's final cache is
 retained; the pre-test detailed cache is not reconstructed. Benchmark prevents
 Ctrl+O/Ctrl+F changes while running. Resize stops recording or execution.
 
-All results go into **OrbitX/Runtime/Logs**. `Performance_N.csv` contains per-view
+Each recording/run that logs creates its own **OrbitX/Runtime/Logs/YYYY-MM-DD_HHMMSS_microseconds/**
+folder, using local system time captured when the session starts, without a timezone
+suffix. All of that session's logs share this folder; timestamp collisions get a
+numeric suffix. None recording creates no folder. Snapshot scripts still go in
+Runtime/Scripts; their timestamp suffix no longer depends on a diagnostic log.
+ `Performance_N.csv` contains per-view
 loading time (including two-second confirmation), measured duration, frame count,
 mean FPS, status and each steady-window bucket's frame count/duration/FPS.
 A separate continuous 10-Hz bucket series spans the entire run, including
@@ -246,7 +254,8 @@ using Beyond Compare. Identical INVALID logs are not a pass. These checks verify
 stable CPU selection and submitted drawing inputs, not texture payloads or pixels.
 Performance measurements are separate so they cannot disturb byte comparison.
 
-**Full** retains the existing livestream diagnostic events and additionally logs
+**Full** writes **all three** file types: the same canonical Regression log, the
+Performance CSV, and the existing livestream diagnostic trace. It additionally logs
 snapshot starts, cache-reset evictions, steady-state arrival and completion.
 `Livestream_<local-start-date-time-microseconds>.log` includes system timestamps,
 monotonic elapsed microseconds, sequence and frame number. It includes initial
@@ -264,3 +273,4 @@ canonical equality and changed draw inputs, timing/reset/stability/timeout,
 actual-duration buckets, worker reset, tracing and the existing surface baseline.
 Windows Visual Studio/HLSL/DX12 execution and panel appearance require local tests.
 All four Visual Studio configurations retain multi-processor compilation (`/MP`).
+

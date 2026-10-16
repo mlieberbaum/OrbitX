@@ -23,6 +23,7 @@
 #include "../Core/EnvironmentTrace.h"
 #include "../Core/CameraScript.h"
 #include "../Core/SnapshotRun.h"
+#include "../Core/ScriptSession.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -73,9 +74,10 @@ private:
     void UpdateScriptPlayback();
     void CaptureRegression();
     Core::RegressionSnapshot RegressionSnapshot()const;
-    enum class ScriptLogging { Benchmark, Full, Regression };
+    enum class ScriptLogging { Benchmark, Full, Regression, None };
     ScriptLogging m_scriptLogging=ScriptLogging::Full;
     Core::RegressionLog m_regressionLog;
+    Core::ScriptSession m_scriptSession;
     bool m_regressionSession=false;
     Core::SnapshotRun m_snapshotRun;
     Core::ScriptFrameRecorder m_scriptFrames;
@@ -227,3 +229,4 @@ private:
     bool m_drag=false; POINT m_dragAnchorScreen{};
 };
 }
+

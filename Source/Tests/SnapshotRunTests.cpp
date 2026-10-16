@@ -1,4 +1,6 @@
 #include "../Core/SnapshotRun.h"
+#include "../Core/ScriptSession.h"
+#include <regex>
 #include "../Graphics/DdsTileLoader.h"
 #include <cassert>
 #include <iostream>
@@ -28,6 +30,22 @@ int main(){
     CameraScript script;script.width=10;script.height=10;script.views={{0,0,1800,40,false}};
     std::filesystem::path path;std::string error;
     assert(SaveSnapshotPerformance(directory,script,{run.Result()},{},"BENCHMARK",false,false,false,"USER_STOP",path,error));assert(std::filesystem::file_size(path)>100);
+    // All writers share the one directory reserved at script start. Identical
+    // timestamps get separate directories; None performs no filesystem writes.
+    ScriptSession session,collision,none;const auto when=std::chrono::system_clock::time_point(std::chrono::microseconds(1234567890123456));
+    assert(session.Begin(directory/"Logs",true,error,when));
+    assert(std::regex_match(session.stamp,std::regex(R"(\d{4}-\d{2}-\d{2}_\d{6}_\d{6})")));
+    assert(session.directory.parent_path()==directory/"Logs");
+    assert(collision.Begin(directory/"Logs",true,error,when)&&collision.directory!=session.directory);
+    assert(none.Begin(directory/"NoLogs",false,error,when)&&none.directory.empty()&&!std::filesystem::exists(directory/"NoLogs"));
+    EnvironmentTrace trace;RegressionLog regression;
+    assert(trace.Start(session.directory));assert(regression.Start(session.directory,script,1,true));
+    regression.View(0,SnapshotRegressionView(0,script.views[0]),{},"READY");regression.Stop(SnapshotHoldUs,"SCRIPT_COMPLETE");trace.Stop("SCRIPT_COMPLETE");
+    assert(SaveSnapshotPerformance(session.directory,script,{run.Result()},{},"FULL",false,false,false,"SCRIPT_COMPLETE",path,error));
+    assert(path.parent_path()==session.directory&&trace.Path().parent_path()==session.directory&&regression.Path().parent_path()==session.directory);
+    size_t files=0;for(const auto& entry:std::filesystem::directory_iterator(session.directory))if(entry.is_regular_file())++files;assert(files==3);
+    {std::ofstream blocked(directory/"blocked");blocked<<"file";}
+    assert(!session.Begin(directory/"blocked"/"Logs",true,error)&&!error.empty());
     // A reset discards queued/ready results and drains an active CPU read. The
     // same tile can then be requested anew, without old-view result pollution.
     auto file=directory/"tile.dds";
@@ -42,3 +60,4 @@ int main(){
     loader.Reset();loader.Stop();std::filesystem::remove_all(directory);
     std::cout<<"Snapshot timing, performance buckets and loader reset tests passed\n";
 }
+
