@@ -36,8 +36,9 @@ public:
     bool Active()const{return active;}
     const std::string& Error()const{return error;}
     const std::filesystem::path& Path()const{return path;}
-    bool Start(const std::filesystem::path& directory,const CameraScript& script,size_t views,bool illuminated,unsigned overlayMode=1,bool graph=false,bool vsync=false){
+    bool Start(const std::filesystem::path& directory,const CameraScript& script,size_t views,bool illuminated,unsigned overlayMode=1,bool graph=false,bool vsync=false,bool manualCapture=false){
         if(active)return false;
+        manual=manualCapture;
         if(file.is_open())file.close();file.clear();error.clear();incomplete=0;
         try{
             std::filesystem::create_directories(directory);unsigned index=1;
@@ -45,7 +46,9 @@ public:
             file.open(path,std::ios::out|std::ios::binary);file.imbue(std::locale::classic());
             if(!file){error="Cannot open regression log";return false;}
             active=true;file<<std::setprecision(std::numeric_limits<float>::max_digits10);
-            Line(0);file<<"REGRESSION format=3 body=Moon radius_km=1737.4 policy=snapshots cache=ROOT_ONLY time=CANONICAL_HOLD steady_us="<<SnapshotSteadyUs<<" hold_us="<<SnapshotHoldUs<<"\n";
+            Line(0);file<<"REGRESSION format=3 body=Moon radius_km=1737.4 policy="<<(manual?"manual_snapshots":"snapshots")
+                <<" cache="<<(manual?"EXISTING":"ROOT_ONLY")<<" time="<<(manual?"CAPTURE_INDEX":"CANONICAL_HOLD")
+                <<" steady_us="<<(manual?0:SnapshotSteadyUs)<<" hold_us="<<(manual?0:SnapshotHoldUs)<<"\n";
             Line(0);file<<"INPUT script_signature="<<std::hex<<ScriptSignature(script)<<std::dec
                 <<" viewport="<<script.width<<","<<script.height<<" views="<<views<<" illumination="<<(illuminated?"FULL":"STANDARD")
                 <<" overlay="<<(overlayMode>1)<<" overlay_mode="<<overlayMode<<" graph="<<graph<<" vsync="<<vsync<<'\n';
@@ -73,16 +76,16 @@ public:
         if(!active)return;++incomplete;Line(view.timeUs);file<<"VIEW index="<<index<<" status=MISSED\n";Check();
     }
     void Stop(uint64_t elapsed,const char* reason){
-        if(active){Line(elapsed);file<<"RESULT status="<<(std::string(reason)=="SCRIPT_COMPLETE"&&!incomplete?"COMPLETE":"INVALID")
+        if(active){Line(elapsed);file<<"RESULT status="<<((std::string(reason)=="SCRIPT_COMPLETE"||std::string(reason)=="RECORDING_COMPLETE")&&!incomplete?"COMPLETE":"INVALID")
             <<" incomplete_views="<<incomplete<<" reason="<<reason<<'\n';Check();}
         active=false;
         if(file.is_open()){file.flush();if(!file&&error.empty())error="Regression log flush failed";file.close();if(file.fail()&&error.empty())error="Regression log close failed";}
     }
     unsigned Incomplete()const{return incomplete;}
 private:
-    void Line(uint64_t t){file<<"elapsed_us="<<t<<' ';}
+    void Line(uint64_t t){file<<(manual?"capture_index=":"elapsed_us=")<<t<<' ';}
     void Id(TileId id){file<<id.level<<'/'<<id.row<<'/'<<id.column;}
     void Check(){if(!file){active=false;error="Regression log write failed";}}
-    std::ofstream file;std::filesystem::path path;std::string error;bool active=false;unsigned incomplete=0;
+    std::ofstream file;std::filesystem::path path;std::string error;bool active=false,manual=false;unsigned incomplete=0;
 };
 }

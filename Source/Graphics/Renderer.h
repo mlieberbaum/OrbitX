@@ -71,6 +71,9 @@ private:
     void StartCameraRecording();
     void StartCameraPlayback();
     void TakeCameraSnapshot();
+    void RecordScriptFrame();
+    void CaptureRecordingRegression();
+    const char* RegressionSnapshotStatus(const Core::RegressionSnapshot& snapshot,const Core::ScriptCamera& camera)const;
     bool ResetScriptCache();
     void CompleteScriptFrame();
     void UpdateScriptPlayback();
@@ -81,6 +84,9 @@ private:
     Core::RegressionLog m_regressionLog;
     Core::ScriptSession m_scriptSession;
     bool m_regressionSession=false;
+    struct RecordedRegressionView {Core::RegressionSnapshot snapshot;std::string status;};
+    std::vector<RecordedRegressionView> m_recordedRegressionViews;
+    bool m_recordingCapturePending=false;
     Core::SnapshotRun m_snapshotRun;
     Core::ScriptFrameRecorder m_scriptFrames;
     bool m_resetThisFrame=false;
@@ -117,6 +123,8 @@ private:
     std::wstring m_scriptStatus;
     uint64_t m_traceFrame=0;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_scriptGreen,m_scriptGlass,m_scriptWhite,m_scriptDisabled;
+    std::array<Microsoft::WRL::ComPtr<IDWriteTextLayout>,4> m_scriptRadioLayouts;
+    std::array<DWRITE_TEXT_METRICS,4> m_scriptRadioMetrics{};
     std::array<Microsoft::WRL::ComPtr<IDWriteTextLayout>,20> m_tileLabelLayouts;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_tileLabelBrush;
     struct CoordinateLabel {

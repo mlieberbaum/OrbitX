@@ -31,9 +31,16 @@ int main(){
     for(auto [w,h]:{std::pair{3840.f,2160.f},std::pair{1280.f,720.f},std::pair{320.f,180.f}}){
         auto l=ScriptPanelLayout::Build(w,h);assert(l.panel.left>=0&&l.panel.top>=0&&l.panel.right<=w&&l.panel.bottom<=h);
         const auto record=ScriptPanelLayout::Build(w,h,true);
-        assert(record.none.right<=record.panel.right&&record.none.left>record.regression.right);
+        assert(record.none.right<=record.panel.right&&record.none.left>record.benchmark.right);
         assert(record.none.Contains((record.none.left+record.none.right)/2,(record.none.top+record.none.bottom)/2));
-        assert(record.benchmark.right<record.livestream.left&&record.livestream.right<record.regression.left);
+        assert(record.livestream.right<record.regression.left&&record.regression.right<record.benchmark.left);
+        const auto gap1=record.regression.left-record.livestream.left;
+        const auto gap2=record.benchmark.left-record.regression.left;
+        const auto gap3=record.none.left-record.benchmark.left;
+        assert(std::abs(gap1-gap2)<.001f&&std::abs(gap2-gap3)<.001f);
+        for(auto pair:{std::pair{record.livestream,l.livestream},std::pair{record.regression,l.regression},std::pair{record.benchmark,l.benchmark},std::pair{record.none,l.none}}){
+            assert(pair.first.left==pair.second.left&&pair.first.right==pair.second.right&&pair.first.top==pair.second.top&&pair.first.bottom==pair.second.bottom);
+        }
         assert(!l.action.Contains(l.snapshot.left,l.snapshot.top));assert(!l.recordTab.Contains(l.runTab.left,l.runTab.top));
     }
     std::filesystem::remove_all(directory);std::cout<<"Snapshot camera script tests passed\n";

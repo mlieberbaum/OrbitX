@@ -37,6 +37,10 @@ int main(){
     assert(baseline.find('\r')==std::string::npos);
     assert(log.Start(root,script,views.size(),true));auto missing=log.Path();log.Missing(0,views[0]);log.Stop(1000,"USER_STOP");
     assert(Read(missing).find("RESULT status=INVALID")!=std::string::npos);
+    assert(log.Start(root,script,views.size(),true,2,true,false,true));const auto manualPath=log.Path();
+    log.View(0,{0,0,a},snapshot,"READY");log.Stop(1,"RECORDING_COMPLETE");
+    const auto manual=Read(manualPath);assert(manual.find("policy=manual_snapshots cache=EXISTING time=CAPTURE_INDEX steady_us=0 hold_us=0")!=std::string::npos);
+    assert(manual.find("capture_index=0 VIEW")!=std::string::npos&&manual.find("elapsed_us=")==std::string::npos&&manual.find("RESULT status=COMPLETE")!=std::string::npos);
     const auto block=root/"file";{std::ofstream out(block);out<<"block";}
     assert(!log.Start(block/"not_a_directory",script,2,true));assert(!log.Active()&&!log.Error().empty());
     assert(log.Start(root,script,2,true));log.Stop(0,"RECOVERED");assert(log.Error().empty());

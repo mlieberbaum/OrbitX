@@ -193,9 +193,12 @@ Load Moon View normally and use **Ctrl+R** to toggle the green glass panel.
 On **Record**, name a script and click **START RECORDING**. No camera samples are
 captured automatically. Position the camera, reopen the panel, and click
 **TAKE SNAPSHOT** for each desired view. The panel confirms the capture and shows
-its count. Ctrl+R hides it for the next camera movement. On Record, **Full**
-keeps the manual diagnostic trace; **None** saves only the snapshot script with
-no logging or log folder. Benchmark/Regression remain disabled while recording.
+its count. Ctrl+R hides it for the next camera movement. On Record, all four logging modes are available in the fixed order **Full,
+Regression, Benchmark, None**. The radio circles are evenly spaced and labels
+are vertically centered. Run uses exactly the same positions and simply hides None.
+Full writes diagnostic, regression and performance files; Regression writes
+regression and performance files; Benchmark writes performance only. None saves
+only the snapshot script with no logging or log folder.
 None is absent from Run; switching from None to Run selects Full. **STOP & SAVE** writes
 ordered views into `Runtime/Scripts`; recording also saves on scenario exit or
 shutdown. LOD must be unfrozen when starting or capturing. Existing mouse controls
@@ -272,7 +275,23 @@ monotonic elapsed microseconds, sequence and frame number. It includes initial
 state, camera/input/settings, loading/cancellation, upload/activation, evictions
 and fences, and changed draw/request/branch states. Numeric comparisons suppress
 unchanged diagnostics. Full is synchronous and affects throughput; use Benchmark
-for speed comparisons. Recording views uses Full tracing for manual exploration.
+for speed comparisons. While recording, Full/Regression capture current tile/draw state when **TAKE
+SNAPSHOT** is clicked, on the next rendered frame after the scene matrix is
+updated. A camera change before that capture marks it incomplete. Captures
+check ready dependencies, coverage and texture
+bindings; an incomplete capture is flagged INVALID rather than treated as a
+settled result. These files declare `policy=manual_snapshots`, `cache=EXISTING`,
+and `capture_index` records, without claiming the timed loading/hold procedure.
+They are buffered and written on stop once the final script signature is known.
+Use Run for repeatable root-only-cache loading, two-second confirmation and
+10-second holds. Manual recording never moves the camera or clears its cache.
+
+Performance samples span the whole manual recording, tagged RECORDING or
+RECORDING_LOADING. Their CSV declares `scope=RECORDING`, keeps the existing
+cache, and does not claim timed holds. Benchmark recording hides/restores the
+exact original overlay/graph state, keeps normal camera controls, and samples
+without Full diagnostics or regression capture. Full/Regression preserve display
+settings. All outputs still share the session's start-time folder.
 
 The top-left ALT readout is distance minus the Moon's spherical radius, not DEM
 height. Normal cache capacity/budget, selection/refinement, loading order, upload

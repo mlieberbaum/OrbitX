@@ -46,6 +46,8 @@ int main(){
     size_t files=0;for(const auto& entry:std::filesystem::directory_iterator(session.directory))if(entry.is_regular_file())++files;assert(files==3);
     {std::ofstream blocked(directory/"blocked");blocked<<"file";}
     assert(!session.Begin(directory/"blocked"/"Logs",true,error)&&!error.empty());
+    assert(SaveSnapshotPerformance(collision.directory,script,{},all.Buckets(),"REGRESSION",2,true,false,"USER_STOP",path,error,"RECORDING"));
+    {std::ifstream in(path);std::string header;std::getline(in,header);assert(header.find("scope=RECORDING cache=EXISTING")!=std::string::npos&&header.find("steady_us=0 hold_us=0")!=std::string::npos);}
     // A reset discards queued/ready results and drains an active CPU read. The
     // same tile can then be requested anew, without old-view result pollution.
     auto file=directory/"tile.dds";
