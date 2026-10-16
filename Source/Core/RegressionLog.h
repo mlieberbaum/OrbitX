@@ -36,7 +36,7 @@ public:
     bool Active()const{return active;}
     const std::string& Error()const{return error;}
     const std::filesystem::path& Path()const{return path;}
-    bool Start(const std::filesystem::path& directory,const CameraScript& script,size_t views,bool illuminated,unsigned overlayMode=1,bool graph=false,bool vsync=false,bool manualCapture=false){
+    bool Start(const std::filesystem::path& directory,const CameraScript& script,size_t views,bool illuminated,unsigned /*overlayMode*/=1,bool /*graph*/=false,bool /*vsync*/=false,bool manualCapture=false){
         if(active)return false;
         manual=manualCapture;
         if(file.is_open())file.close();file.clear();error.clear();incomplete=0;
@@ -46,12 +46,11 @@ public:
             file.open(path,std::ios::out|std::ios::binary);file.imbue(std::locale::classic());
             if(!file){error="Cannot open regression log";return false;}
             active=true;file<<std::setprecision(std::numeric_limits<float>::max_digits10);
-            Line(0);file<<"REGRESSION format=3 body=Moon radius_km=1737.4 policy="<<(manual?"manual_snapshots":"snapshots")
+            Line(0);file<<"REGRESSION format=4 body=Moon radius_km=1737.4 policy="<<(manual?"manual_snapshots":"snapshots")
                 <<" cache="<<(manual?"EXISTING":"ROOT_ONLY")<<" time="<<(manual?"CAPTURE_INDEX":"CANONICAL_HOLD")
                 <<" steady_us="<<(manual?0:SnapshotSteadyUs)<<" hold_us="<<(manual?0:SnapshotHoldUs)<<"\n";
             Line(0);file<<"INPUT script_signature="<<std::hex<<ScriptSignature(script)<<std::dec
-                <<" viewport="<<script.width<<","<<script.height<<" views="<<views<<" illumination="<<(illuminated?"FULL":"STANDARD")
-                <<" overlay="<<(overlayMode>1)<<" overlay_mode="<<overlayMode<<" graph="<<graph<<" vsync="<<vsync<<'\n';
+                <<" viewport="<<script.width<<","<<script.height<<" views="<<views<<" illumination="<<(illuminated?"FULL":"STANDARD")<<'\n';
             Check();return active;
         }catch(const std::exception& e){error=e.what();active=false;return false;}
     }

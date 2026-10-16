@@ -195,11 +195,12 @@ captured automatically. Position the camera, reopen the panel, and click
 **TAKE SNAPSHOT** for each desired view. The panel confirms the capture and shows
 its count. Ctrl+R hides it for the next camera movement. On Record, all four logging modes are available in the fixed order **Full,
 Regression, Benchmark, None**. The radio circles are evenly spaced and labels
-are vertically centered. Run uses exactly the same positions and simply hides None.
+are vertically centered. Run uses exactly the same four positions. The selected
+mode, including None, persists when switching tabs.
 Full writes diagnostic, regression and performance files; Regression writes
 regression and performance files; Benchmark writes performance only. None saves
 only the snapshot script with no logging or log folder.
-None is absent from Run; switching from None to Run selects Full. **STOP & SAVE** writes
+None is available on both tabs and never creates log files or a log folder. **STOP & SAVE** writes
 ordered views into `Runtime/Scripts`; recording also saves on scenario exit or
 shutdown. LOD must be unfrozen when starting or capturing. Existing mouse controls
 and camera orientation, including continuous pole crossings, are unchanged.
@@ -212,7 +213,7 @@ an existing script, and report errors. Closing the app abruptly can lose unsaved
 views. Scripts and logs are ignored by Git.
 
 On **Run**, select a script (wheel scrolls), select **Benchmark**, **Regression**
-or **Full**, then **RUN SCRIPT**. The panel closes. Each view:
+**Full**, or **None**, then **RUN SCRIPT**. The panel closes. Each view:
 
 1. Drains/discards prior DDS reads and waits for both GPU queues before clearing
    detailed tiles, failures and deferred work. The two resident roots, index,
@@ -231,9 +232,10 @@ or **Full**, then **RUN SCRIPT**. The panel closes. Each view:
 
 Only **Benchmark** selects overlay mode 1 and hides the FPS graph, then restores
 the exact original overlay mode (1/2/3) and graph state.
-Regression and Full preserve them; their settings are recorded. Reopening the
-panel or changing overlay/graph settings during a run invalidates results as
-SETTINGS_CHANGED because measurement conditions changed. Ctrl+R still works;
+Regression, Full and None preserve them. Reopening the panel or changing
+overlay/graph settings during a run still marks performance results as
+SETTINGS_CHANGED, but never invalidates tile correctness in regression. Display
+state changes remain recorded in the Full diagnostic trace. Ctrl+R still works;
 **STOP SCRIPT** cancels and closes the panel. Completion, cancellation, resize,
 log failure, scenario exit and shutdown restore the original camera/FOV/LOD
 freeze state (including frozen leaves/dependencies). The test's final cache is
@@ -258,7 +260,7 @@ VSync and display settings consistent. ROOT_ONLY resets our renderer cache;
 Windows' disk cache is uncontrolled, so these are not guaranteed cold disk reads.
 
 **Regression** also writes `Regression_N.log`: canonical, sorted camera/scene,
-selected-tile and draw tile/source/grid/index/UV records, with settings and script
+selected-tile and draw tile/source/grid/index/UV records, with camera inputs and script
 signature. No system time, loading time, FPS, physical slots, fences or worker
 order appear. `elapsed_us` is a **canonical hold timeline**, ten seconds per view,
 excluding variable loading waits. It is deliberately not actual run duration.
@@ -304,7 +306,14 @@ Windows Visual Studio/HLSL/DX12 execution and panel appearance require local tes
 All four Visual Studio configurations retain multi-processor compilation (`/MP`).
 
 
-Overlay mode is included in Full, Regression and Performance output. Canonical
-regression format 3 adds `overlay_mode` to distinguish all three modes; establish
-a new baseline after this update. Changing between modes 2/3 during a script run
-invalidates measurements just like other changes in display conditions.
+Display state is included in Full and Performance output, not Regression.
+Canonical regression format 4 excludes overlays, FPS graph, recorder-window
+visibility and VSync; changing these never causes a regression SETTINGS_CHANGED.
+Camera/matrices, tile selection/draw data, readiness, coverage, bindings and actual
+missing/incomplete captures still determine correctness. Establish a fresh
+format-4 baseline once; matching tile results then compare byte-for-byte across
+display settings. Performance output and its validity checks are unchanged.
+
+None playback uses the same snapshot/loading/hold sequence and restores the
+original camera, while preserving display settings. It activates no log writer,
+creates no log folder and records no continuous performance series.

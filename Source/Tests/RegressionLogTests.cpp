@@ -30,7 +30,13 @@ int main(){
     changed=snapshot;changed.draws[0].indexCount=42;assert(write(changed)!=baseline);
     changed=snapshot;changed.scene[0]=.99f;assert(write(changed)!=baseline);
     assert(log.Start(root,script,views.size(),true,3));const auto mode3=log.Path();log.Stop(0,"USER_STOP");
-    assert(Read(mode3).find("overlay_mode=3")!=std::string::npos);
+    assert(Read(mode3).find("overlay_mode=")==std::string::npos);
+    // Display settings never enter canonical tile correctness output.
+    for(unsigned overlay:{1u,2u,3u})for(bool graph:{false,true})for(bool vsync:{false,true}){
+        assert(log.Start(root,script,views.size(),true,overlay,graph,vsync));const auto path=log.Path();
+        for(size_t i=0;i<views.size();++i){snapshot.camera=views[i].camera;log.View(i,views[i],snapshot,"READY");}
+        log.Stop(script.views.size()*SnapshotHoldUs,"SCRIPT_COMPLETE");assert(Read(path)==baseline);
+    }
     const auto failed=write(snapshot,"PENDING");assert(failed.find("RESULT status=INVALID")!=std::string::npos&&failed!=baseline);
     assert(baseline.find("RESULT status=COMPLETE")!=std::string::npos);
     for(const auto* excluded:{"frame=","seq=","slot=","fence=","cpu=","2026-","Livestream_"})assert(baseline.find(excluded)==std::string::npos);

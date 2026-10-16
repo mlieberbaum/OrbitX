@@ -69,7 +69,7 @@ void Renderer::DrawScriptPanel(){
     radio(l.livestream,L"FULL",0,m_scriptLogging==ScriptLogging::Full);
     radio(l.regression,L"REGRESSION",1,m_scriptLogging==ScriptLogging::Regression);
     radio(l.benchmark,L"BENCHMARK",2,m_scriptLogging==ScriptLogging::Benchmark);
-    if(m_recordTab)radio(l.none,L"NONE",3,m_scriptLogging==ScriptLogging::None);
+    radio(l.none,L"NONE",3,m_scriptLogging==ScriptLogging::None);
     text(m_recordTab?L"Ctrl+R hides the panel / only button clicks capture views":L"Cold tile cache / FPS throughout / 10 s steady hold",
          l.panel.left+28*l.scale,l.panel.top+418*l.scale,m_scriptWhite.Get());
     if(m_scriptOperation==ScriptOperation::Recording){
@@ -80,7 +80,7 @@ void Renderer::DrawScriptPanel(){
         const auto phase=m_snapshotRun.State()==Core::SnapshotRun::Phase::Measuring?L"MEASURING":L"LOADING / WAITING FOR STABILITY";
         auto progress=L"View "+std::to_wstring(m_currentView+1)+L" / "+std::to_wstring(m_cameraScript.views.size())+L" / "+phase;
         text(progress.c_str(),l.panel.left+28*l.scale,l.panel.top+470*l.scale,m_scriptWhite.Get());
-        text(L"Panel visibility changes invalidate performance measurements.",l.panel.left+28*l.scale,l.panel.top+503*l.scale,m_scriptDisabled.Get());
+        if(m_scriptLogging!=ScriptLogging::None)text(L"Panel visibility changes invalidate performance measurements.",l.panel.left+28*l.scale,l.panel.top+503*l.scale,m_scriptDisabled.Get());
     }else if(!m_scriptStatus.empty())text(m_scriptStatus.c_str(),l.panel.left+28*l.scale,l.panel.top+503*l.scale,m_scriptWhite.Get());
     const bool enabled=active||m_recordTab||!m_savedScripts.empty();
     button(l.action,active?(m_scriptOperation==ScriptOperation::Recording?L"STOP & SAVE":L"STOP SCRIPT"):(m_recordTab?L"START RECORDING":L"RUN SCRIPT"),m_scriptHover==0,enabled);
@@ -112,15 +112,15 @@ void Renderer::ScriptPanelClick(float x,float y){
         return;
     }
     m_scriptNameFocused=false;
-    if(l.recordTab.Contains(x,y)){m_recordTab=true;m_scriptLogging=ScriptLogging::Full;}
-    else if(l.runTab.Contains(x,y)){m_recordTab=false;if(m_scriptLogging==ScriptLogging::None)m_scriptLogging=ScriptLogging::Full;RefreshScripts();}
+    if(l.recordTab.Contains(x,y)){m_recordTab=true;}
+    else if(l.runTab.Contains(x,y)){m_recordTab=false;RefreshScripts();}
     else if(l.script.Contains(x,y)){
         if(m_recordTab)m_scriptNameFocused=true;
         else{
             const auto row=static_cast<size_t>((y-l.script.top)/(30*l.scale));
             if(row<5&&m_scriptListOffset+row<m_savedScripts.size())m_selectedScript=m_scriptListOffset+row;
         }
-    }else if(m_recordTab&&l.none.Contains(x,y))m_scriptLogging=ScriptLogging::None;
+    }else if(l.none.Contains(x,y))m_scriptLogging=ScriptLogging::None;
     else if(l.livestream.Contains(x,y))m_scriptLogging=ScriptLogging::Full;
     else if(l.benchmark.Contains(x,y))m_scriptLogging=ScriptLogging::Benchmark;
     else if(l.regression.Contains(x,y))m_scriptLogging=ScriptLogging::Regression;
@@ -162,11 +162,10 @@ void Renderer::TakeCameraSnapshot(){
 }
 void Renderer::StartCameraPlayback(){
     if(m_selectedScript>=m_savedScripts.size())return;
-    if(m_scriptLogging==ScriptLogging::None){m_scriptStatus=L"Select a logging mode for script execution";return;}
     Core::CameraScript script;std::string error;
     if(!Core::CameraScript::Load(m_savedScripts[m_selectedScript],script,error)){SetError(error);m_scriptStatus=L"Cannot load script / recreate old paths with TAKE SNAPSHOT";return;}
     if(script.width!=m_width||script.height!=m_height){m_scriptStatus=L"Match recorded viewport: "+std::to_wstring(script.width)+L" x "+std::to_wstring(script.height);return;}
-    if(!m_scriptSession.Begin(std::filesystem::path(m_root)/L"Logs",true,error)){SetError(error);m_scriptStatus=L"Cannot create script log folder";return;}
+    if(!m_scriptSession.Begin(std::filesystem::path(m_root)/L"Logs",m_scriptLogging!=ScriptLogging::None,error)){SetError(error);m_scriptStatus=L"Cannot create script log folder";return;}
     OnMouseUp();m_savedCamera=CurrentScriptCamera();m_savedOverlayMode=m_tileOverlayMode;m_savedGraph=m_showFrameGraph;
     m_savedFrozenLeaves=m_planet.leaves;m_savedFrozenRequests=m_planet.requests;m_savedFrozenDependencies=m_planet.dependencies;
     if(m_scriptLogging==ScriptLogging::Regression||m_scriptLogging==ScriptLogging::Full){
@@ -188,7 +187,7 @@ void Renderer::StartCameraPlayback(){
     }else if(m_scriptLogging==ScriptLogging::Benchmark){m_tileOverlayMode=1;m_showFrameGraph=false;m_telemetryText.clear();}
     m_runOverlayMode=m_tileOverlayMode;m_runGraph=m_showFrameGraph;m_runVsync=m_vsync;
     m_cameraScript=std::move(script);m_currentView=0;m_beginSnapshot=true;m_snapshotResults.clear();m_snapshotResults.reserve(m_cameraScript.views.size());m_runInvalid=false;
-    m_scriptFrames.Begin(ScriptNow());
+    if(m_scriptLogging!=ScriptLogging::None)m_scriptFrames.Begin(ScriptNow());
     m_scriptOperation=ScriptOperation::Playing;m_scriptPanelOpen=false;m_scriptHover=-1;
     m_trace.Log([&](auto& out){out<<"SCRIPT_RUN_BEGIN format=SNAPSHOTS views="<<m_cameraScript.views.size()<<" cache_policy=ROOT_ONLY steady_us="<<Core::SnapshotSteadyUs<<" hold_us="<<Core::SnapshotHoldUs;});
 }
@@ -303,13 +302,16 @@ void Renderer::CaptureRegression(){
 }
 void Renderer::CompleteScriptFrame(){
     const auto now=ScriptNow();const auto before=m_snapshotRun.State();
-    m_scriptFrames.Frame(now,m_currentView,m_resetThisFrame?"RESET_LOADING":before==Core::SnapshotRun::Phase::Measuring?"MEASURING":"LOADING");
+    if(m_scriptLogging!=ScriptLogging::None)m_scriptFrames.Frame(now,m_currentView,m_resetThisFrame?"RESET_LOADING":before==Core::SnapshotRun::Phase::Measuring?"MEASURING":"LOADING");
     m_snapshotRun.Observe(now,m_snapshotReady,m_snapshotChanged);
     if(before!=m_snapshotRun.State()&&m_snapshotRun.State()==Core::SnapshotRun::Phase::Measuring)
         m_trace.Log([&](auto& out){out<<"SCRIPT_STEADY index="<<m_currentView<<" loading_us="<<m_snapshotRun.Result().loadingUs;});
     if(m_snapshotRun.State()!=Core::SnapshotRun::Phase::Done)return;
-    auto result=m_snapshotRun.Result();if(m_runInvalid&&result.status=="READY")result.status="SETTINGS_CHANGED";
+    auto result=m_snapshotRun.Result();
+    // Tile correctness is independent of UI and display state. Preserve the
+    // existing performance status separately, after the regression capture.
     if(m_regressionSession)m_regressionLog.View(m_currentView,Core::SnapshotRegressionView(m_currentView,m_cameraScript.views[m_currentView]),m_previousRegressionSnapshot,result.status.c_str());
+    if(m_runInvalid&&result.status=="READY")result.status="SETTINGS_CHANGED";
     m_trace.Log([&](auto& out){out<<"SCRIPT_VIEW_END index="<<m_currentView<<" status="<<result.status<<" loading_us="<<result.loadingUs<<" measurement_us="<<result.measurementUs<<" frames="<<result.frames;});
     m_snapshotResults.push_back(std::move(result));++m_currentView;m_beginSnapshot=true;
 }
@@ -410,7 +412,7 @@ void Renderer::StopLivestream(const char* reason){
     const bool complete=std::string(reason)=="SCRIPT_COMPLETE";
     const bool regression=m_regressionSession;
     std::filesystem::path performancePath;std::string performanceError;
-    if(playing||recordingLogs){
+    if((playing||recordingLogs)&&m_scriptLogging!=ScriptLogging::None){
         if(playing&&!complete&&!m_beginSnapshot){auto partial=m_snapshotRun.Result();partial.status="CANCELLED";m_snapshotResults.push_back(std::move(partial));}
         m_scriptFrames.Finish(ScriptNow());
         const char* mode=m_scriptLogging==ScriptLogging::Benchmark?"BENCHMARK":m_scriptLogging==ScriptLogging::Regression?"REGRESSION":"FULL";
@@ -427,7 +429,7 @@ void Renderer::StopLivestream(const char* reason){
             for(size_t i=0;i<m_cameraScript.views.size();++i){
                 Core::RegressionView view{i,i,m_cameraScript.views[i]};
                 if(i>=m_recordedRegressionViews.size())m_regressionLog.Missing(i,view);
-                else{const auto& capture=m_recordedRegressionViews[i];m_regressionLog.View(i,view,capture.snapshot,m_runInvalid?"SETTINGS_CHANGED":capture.status.c_str());}
+                else{const auto& capture=m_recordedRegressionViews[i];m_regressionLog.View(i,view,capture.snapshot,capture.status.c_str());}
             }
             const std::string why=reason;
             const bool savedStop=!m_cameraScript.views.empty()&&(why=="USER_STOP"||why=="SCENARIO_EXIT"||why=="APPLICATION_SHUTDOWN");
@@ -458,7 +460,7 @@ void Renderer::StopLivestream(const char* reason){
     if(!m_trace.Error().empty()&&m_scriptLogging!=ScriptLogging::None)SetError(m_trace.Error());
     if(regression)m_scriptStatus=m_regressionLog.Path().filename().wstring()+(validRegression?L" / COMPLETE / compare baseline":L" / INVALID / inspect before comparing");
     if(!performanceError.empty()){SetError(performanceError);m_scriptStatus+=L" / performance write failed";}
-    else if(playing||recordingLogs)m_scriptStatus+=L" / "+performancePath.filename().wstring();
+    else if((playing&&m_scriptLogging!=ScriptLogging::None)||recordingLogs)m_scriptStatus+=L" / "+performancePath.filename().wstring();
     if(recordingRegression)m_scriptStatus+=recordingLogValid?L" / regression captured":L" / regression INVALID";
     if(recording)m_recordedRegressionViews.clear();
 }
