@@ -317,3 +317,45 @@ display settings. Performance output and its validity checks are unchanged.
 None playback uses the same snapshot/loading/hold sequence and restores the
 original camera, while preserving display settings. It activates no log writer,
 creates no log folder and records no continuous performance series.
+
+## Settled-view CPU and upload bookkeeping optimization
+
+A fully loaded, unchanged view reuses its selected leaves and draw records.
+The exact camera angles/distance/FOV, viewport, LOD-freeze state, resident tile
+count, indexed file count, upload submission fence and selected leaves must still
+match. Pending requests, deferred uploads and failed textures disable reuse.
+Only a frame with all cached textures ready can be remembered. LRU touches still
+advance every frame, and DrawPlanet still submits every patch and updates draw
+fences. Scene matrices, HUD, overlays and presentation continue normally.
+Camera/viewport/freeze/residency changes return to the original selection path.
+Script cache resets, camera restoration and new Full trace sessions explicitly
+invalidate reuse. Cached resource pointers are used only while their settled
+frame remains valid; mutation takes the original path before resources recycle.
+
+Upload completion scans run only when the completed upload fence changes.
+Texture descriptors use an occupancy bitset instead of building a temporary
+set for each upload, preserving the exact lowest-free-slot rule. Failed GPU
+allocations do not consume a slot. Safe evictions and script resets release
+slots after the existing fence/dependency protections. The draw-pin set is built
+only when byte/slot pressure requires eviction. Cache capacity/budget, traversal,
+LOD thresholds, culling, loading priorities, 16-attempt/2-ms upload budgets,
+shader data and draw submission are unchanged. Moving/loading views still use
+the original selector; stationary views benefit most from reuse.
+
+`PlanetPerformanceTests.cpp` checks all reuse keys/invalidation cases and
+compares 30,000 descriptor allocations/releases against the previous set rule,
+including full and partial descriptor-word boundaries. A portable GPU-stubbed
+adapter comparison of the actual old/new tile-update methods checked 4,670
+controlled frames across loading, camera/FOV/viewport changes, both poles,
+freeze/unfreeze, cache pressure, failure state, residency and LRU touches.
+Component timings exclude real GPU allocation, rendering, HUD and presentation;
+they are not end-to-end FPS estimates. Windows/DX12 performance remains a local
+measurement.
+
+Keep the existing format-4 regression baseline: no log-format changes are made
+by this optimization. Rebuild Env_Test_Release, rerun Regression and compare
+against the baseline. Then rerun the same Benchmark scripts at the same viewport,
+with VSync off and without opening Ctrl+R or changing display settings during the
+run. Compare each script/view against itself; different script signatures are
+not before/after measurements. Remember that loading_us includes the required
+two-second stability confirmation and Windows' disk cache is uncontrolled.
