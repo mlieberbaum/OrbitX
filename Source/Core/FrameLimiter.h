@@ -17,6 +17,19 @@ inline bool ParseFrameLimit(std::string_view text,unsigned& value){
     if(error!=std::errc{}||end!=text.data()+text.size()||parsed<FrameLimit::MinFPS||parsed>FrameLimit::MaxFPS)return false;
     value=parsed;return true;
 }
+// The edit control stores wide digits: validate them directly, with no narrowing.
+inline bool ParseFrameLimit(std::wstring_view text,unsigned& value){
+    if(text.empty())return false;
+    unsigned parsed=0;
+    for(const wchar_t c:text){
+        if(c<L'0'||c>L'9')return false;
+        const unsigned digit=static_cast<unsigned>(c-L'0');
+        if(parsed>(FrameLimit::MaxFPS-digit)/10)return false;
+        parsed=parsed*10+digit;
+    }
+    if(parsed<FrameLimit::MinFPS)return false;
+    value=parsed;return true;
+}
 // Frame starts are spaced without spinning or catching up after a slow frame.
 // A mode/rate change starts a fresh schedule, including entry/exit from benchmarks.
 class FramePacer {

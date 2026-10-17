@@ -1,6 +1,7 @@
 #include "../Core/FrameLimiter.h"
 #include "../Core/DisplayPreferences.h"
 #include "../Core/MenuLayout.h"
+#include "../Core/EngineConfig.h"
 #include <cassert>
 #include <chrono>
 #include <iostream>
@@ -14,6 +15,13 @@ int main(){
     assert(ParseFrameLimit("1",value)&&value==1);
     assert(ParseFrameLimit("10000",value)&&value==10000);
     assert(ParseFrameLimit("144",value)&&value==144);
+    unsigned wide=120;
+    for(auto text:{L"",L"0",L"-1",L"+60",L"1.5",L" 60",L"60 ",L"10001",L"999999999999999999",L"\u0661",L"\uFF11"}){
+        assert(!ParseFrameLimit(std::wstring_view(text),wide));assert(wide==120);
+    }
+    assert(ParseFrameLimit(L"1",wide)&&wide==1);
+    assert(ParseFrameLimit(L"10000",wide)&&wide==10000);
+    assert(ParseFrameLimit(L"00144",wide)&&wide==144);
     FrameLimit limit{true,144};assert(limit.Effective(false)==144&&limit.Effective(true)==0);
     // Bypass never mutates the preference, so every exit path restores it.
     for(int i=0;i<4;++i){assert(limit.Effective(true)==0);assert(limit.Effective(false)==144);}
@@ -55,16 +63,22 @@ int main(){
     assert(SaveDisplayPreferences(path,{false,false,true,999999}));prefs=LoadDisplayPreferences(path);assert(prefs.frameCap==120);
     std::ofstream(path)<<"FrameRateLimit=Capped\nFrameRateLimit=Uncapped\nMaxFPS=60\nMaxFPS=144\n";
     assert(SaveDisplayPreferences(path,{true,true,true,240}));prefs=LoadDisplayPreferences(path);assert(prefs.frameCapEnabled&&prefs.frameCap==240);
-    // Startup-only optimization choice defaults off, round-trips and survives cap/display saves.
-    std::ofstream(path)<<"DisplayMode=Windowed\nVSync=On\nOther=keep\n";
-    prefs=LoadDisplayPreferences(path);assert(!prefs.planetOptimizations);
-    assert(SaveDisplayPreferences(path,{false,true,true,120,true}));prefs=LoadDisplayPreferences(path);
-    assert(prefs.planetOptimizations&&prefs.frameCapEnabled&&prefs.frameCap==120);
-    prefs.fullscreen=true;prefs.vsync=false;prefs.frameCapEnabled=false;
-    assert(SaveDisplayPreferences(path,prefs));prefs=LoadDisplayPreferences(path);assert(prefs.planetOptimizations&&!prefs.frameCapEnabled);
-    std::ofstream(path)<<"PlanetOptimizations=invalid\n";assert(!LoadDisplayPreferences(path).planetOptimizations);
-    std::ofstream(path)<<"PlanetOptimizations=On\nPlanetOptimizations=Off\n";
-    assert(SaveDisplayPreferences(path,{true,false,false,120,true}));assert(LoadDisplayPreferences(path).planetOptimizations);
+    // Engine configuration is independent of user display preferences and never rewritten.
+    const auto engine=dir/"Config"/"OrbitX.cfg";
+    assert(!LoadPlanetOptimizations(engine));assert(!std::filesystem::exists(engine));
+    std::ofstream(engine)<<"# PlanetOptimizations=On\nTextureRoot=C:\\Textures\n";
+    assert(!LoadPlanetOptimizations(engine));
+    std::ofstream(engine)<<"; comment\r\n PlanetOptimizations = On  ; experiment\r\n";
+    assert(LoadPlanetOptimizations(engine));
+    std::ofstream(path)<<"PlanetOptimizations=Off\nOther=keep\nVSync=Off\n";
+    prefs=LoadDisplayPreferences(path);prefs.vsync=true;assert(SaveDisplayPreferences(path,prefs));
+    std::ifstream prefInput(path);std::string savedPrefs((std::istreambuf_iterator<char>(prefInput)),{});prefInput.close();
+    assert(savedPrefs.find("PlanetOptimizations")==std::string::npos&&savedPrefs.find("Other=keep")!=std::string::npos);
+    assert(LoadPlanetOptimizations(engine));
+    std::ifstream engineInput(engine);std::string engineText((std::istreambuf_iterator<char>(engineInput)),{});engineInput.close();
+    assert(engineText=="; comment\r\n PlanetOptimizations = On  ; experiment\r\n");
+    std::ofstream(engine)<<"PlanetOptimizations=On\nPlanetOptimizations=Off\n";assert(!LoadPlanetOptimizations(engine));
+    std::ofstream(engine)<<"PlanetOptimizations=invalid\n";assert(!LoadPlanetOptimizations(engine));
     std::filesystem::remove_all(dir);
     for(auto size:{std::pair{1920.f,1080.f},std::pair{3840.f,2160.f},std::pair{1280.f,720.f}}){
         auto l=OrbitX::UI::BuildSubmenuLayout(size.first,size.second);

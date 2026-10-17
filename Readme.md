@@ -353,7 +353,7 @@ Regression output to the existing baseline.
 
 ### Experimental planet optimization preference
 
-Close OrbitX, edit Runtime/Config/UserPreferences.cfg, then restart:
+Close OrbitX, edit Runtime/Config/OrbitX.cfg, then restart:
 
     PlanetOptimizations=Off
 
@@ -362,9 +362,10 @@ scan, descriptor set allocation and draw-pin bookkeeping from 2d2dad9. Set On
 to enable f423679's settled-view reuse, fence scan shortcut, descriptor occupancy
 bitset and pressure-only pin bookkeeping. This is a startup-only experimental
 switch, independent of the frame cap; Benchmark bypasses only the cap and tests
-whichever implementation you selected. Display/VSync/exit saves preserve the
-optimization choice. Full session headers record it; regression/performance
-formats remain unchanged. Regression outputs should match in both modes.
+whichever implementation you selected. Display/VSync/exit saves only update
+UserPreferences.cfg and never rewrite OrbitX.cfg. Obsolete PlanetOptimizations
+entries in user preferences are ignored and removed on the next preference save.
+Full session headers record it; regression/performance formats remain unchanged. Regression outputs should match in both modes.
 
 The previous three helper/test files are restored for the optional optimized
 path. Camera/LOD, cache capacity, dependency/eviction protections, upload budgets,
