@@ -55,6 +55,16 @@ int main(){
     assert(SaveDisplayPreferences(path,{false,false,true,999999}));prefs=LoadDisplayPreferences(path);assert(prefs.frameCap==120);
     std::ofstream(path)<<"FrameRateLimit=Capped\nFrameRateLimit=Uncapped\nMaxFPS=60\nMaxFPS=144\n";
     assert(SaveDisplayPreferences(path,{true,true,true,240}));prefs=LoadDisplayPreferences(path);assert(prefs.frameCapEnabled&&prefs.frameCap==240);
+    // Startup-only optimization choice defaults off, round-trips and survives cap/display saves.
+    std::ofstream(path)<<"DisplayMode=Windowed\nVSync=On\nOther=keep\n";
+    prefs=LoadDisplayPreferences(path);assert(!prefs.planetOptimizations);
+    assert(SaveDisplayPreferences(path,{false,true,true,120,true}));prefs=LoadDisplayPreferences(path);
+    assert(prefs.planetOptimizations&&prefs.frameCapEnabled&&prefs.frameCap==120);
+    prefs.fullscreen=true;prefs.vsync=false;prefs.frameCapEnabled=false;
+    assert(SaveDisplayPreferences(path,prefs));prefs=LoadDisplayPreferences(path);assert(prefs.planetOptimizations&&!prefs.frameCapEnabled);
+    std::ofstream(path)<<"PlanetOptimizations=invalid\n";assert(!LoadDisplayPreferences(path).planetOptimizations);
+    std::ofstream(path)<<"PlanetOptimizations=On\nPlanetOptimizations=Off\n";
+    assert(SaveDisplayPreferences(path,{true,false,false,120,true}));assert(LoadDisplayPreferences(path).planetOptimizations);
     std::filesystem::remove_all(dir);
     for(auto size:{std::pair{1920.f,1080.f},std::pair{3840.f,2160.f},std::pair{1280.f,720.f}}){
         auto l=OrbitX::UI::BuildSubmenuLayout(size.first,size.second);

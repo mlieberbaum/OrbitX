@@ -26,6 +26,8 @@
 #include "../Core/ScriptSession.h"
 #include "../Core/TileOverlay.h"
 #include "../Core/FrameLimiter.h"
+#include "../Core/PlanetFrameCache.h"
+#include "../Core/DescriptorSlots.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -194,12 +196,17 @@ private:
     std::optional<DdsTileLoader::Result> m_deferredTile;
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_uploadQueue;
     Microsoft::WRL::ComPtr<ID3D12Fence> m_uploadFence;
-    UINT64 m_uploadFenceValue=0;
+    UINT64 m_uploadFenceValue=0,m_lastCollectedUploadFence=UINT64_MAX;
     std::array<UploadBatch,3> m_uploadBatches;
     std::array<PatchMesh,4> m_patchMeshes;
     std::map<Core::TileId,TileResource> m_tiles;
     std::set<Core::TileId> m_failedTiles;
     std::vector<TileDraw> m_tileDraws;
+    // Startup-only preference: changing implementation requires a restart.
+    bool m_planetOptimizations=false;
+    Core::PlanetFrameCache m_settledPlanetCache;
+    std::vector<TileResource*> m_settledTouchedTiles;
+    Core::DescriptorSlots<TileCapacity> m_descriptorSlots;
     std::set<Core::TileId> m_traceDrawIds,m_traceRequestIds;
     Core::TraceStateCache<Core::TileId,TileDraw> m_traceDrawStates;
     Core::TraceStateCache<int,std::array<double,11>> m_traceCameraStates;

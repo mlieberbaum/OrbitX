@@ -351,8 +351,25 @@ Exit/relaunch to confirm persistence, test Uncapped's disabled field, and compar
 Regression output to the existing baseline.
 
 
-The settled-view reuse and upload-bookkeeping optimization from f423679 was
-reverted to the tile-processing implementation in 2d2dad9. FPS controls and
-benchmark bypass remain available; select Uncapped to compare the original
-uncapped behavior. This restores the earlier CPU workload, not a GPU thermal
-limit. Rebuild and compare regression output and temperatures locally.
+### Experimental planet optimization preference
+
+Close OrbitX, edit Runtime/Config/UserPreferences.cfg, then restart:
+
+    PlanetOptimizations=Off
+
+Off is the default and runs the original per-frame selection, upload-completion
+scan, descriptor set allocation and draw-pin bookkeeping from 2d2dad9. Set On
+to enable f423679's settled-view reuse, fence scan shortcut, descriptor occupancy
+bitset and pressure-only pin bookkeeping. This is a startup-only experimental
+switch, independent of the frame cap; Benchmark bypasses only the cap and tests
+whichever implementation you selected. Display/VSync/exit saves preserve the
+optimization choice. Full session headers record it; regression/performance
+formats remain unchanged. Regression outputs should match in both modes.
+
+The previous three helper/test files are restored for the optional optimized
+path. Camera/LOD, cache capacity, dependency/eviction protections, upload budgets,
+shaders and patch submission remain unchanged. Use the same view, cap and VSync
+for thermal comparisons, allowing temperatures to settle. Start with a 120 FPS
+cap for normal viewing; use the monitor's refresh rate as another useful target.
+An FPS cap is a ceiling, not a guaranteed rate. OS timer/wakeup overhead can make
+very high caps undershoot, particularly at sub-millisecond frame intervals.

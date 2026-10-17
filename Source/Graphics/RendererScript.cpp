@@ -193,6 +193,7 @@ void Renderer::StartCameraPlayback(){
     m_trace.Log([&](auto& out){out<<"SCRIPT_RUN_BEGIN format=SNAPSHOTS views="<<m_cameraScript.views.size()<<" cache_policy=ROOT_ONLY steady_us="<<Core::SnapshotSteadyUs<<" hold_us="<<Core::SnapshotHoldUs;});
 }
 bool Renderer::ResetScriptCache(){
+    m_settledPlanetCache.Invalidate();
     m_tileLoader.Reset();m_deferredTile.reset();
     // Both queues must finish before textures or descriptor slots are recycled.
     const auto drawFence=++m_nextFenceValue;
@@ -209,7 +210,7 @@ bool Renderer::ResetScriptCache(){
         const auto id=it->first;
         m_trace.Log([&](auto& out){out<<"TILE_EVICT tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=SCRIPT_CACHE_RESET slot="<<it->second.slot<<" bytes="<<it->second.bytes
             <<" last_draw_fence="<<it->second.lastDrawFence<<" draw_fence_completed="<<m_fence->GetCompletedValue()<<" upload_fence="<<it->second.uploadFence;});
-        m_tileBytes-=it->second.bytes;it=m_tiles.erase(it);
+        m_tileBytes-=it->second.bytes;if(m_planetOptimizations)m_descriptorSlots.Release(it->second.slot);it=m_tiles.erase(it);
     }
     m_failedTiles.clear();m_tileDraws.clear();m_planet.leaves.clear();m_planet.requests.clear();m_planet.dependencies.clear();
     for(auto& batch:m_uploadBatches){batch.tiles.clear();batch.used=0;}
@@ -327,6 +328,7 @@ void Renderer::FinishCameraScript(const char* reason){
         if(error.empty()&&m_cameraScript.Save(file,error)){m_scriptStatus=L"Saved: "+file.filename().wstring();RefreshScripts();}
         else{SetError(error);m_scriptStatus=L"Camera script save failed / see OrbitX.log";}
     }else if(operation==ScriptOperation::Playing){
+        m_settledPlanetCache.Invalidate();
         ApplyScriptCamera(m_savedCamera);
         if(m_savedCamera.frozen){m_planet.leaves=std::move(m_savedFrozenLeaves);m_planet.requests=std::move(m_savedFrozenRequests);m_planet.dependencies=std::move(m_savedFrozenDependencies);}
         if(m_scriptLogging==ScriptLogging::Benchmark){m_tileOverlayMode=m_savedOverlayMode;m_showFrameGraph=m_savedGraph;}m_telemetryText.clear();
@@ -371,6 +373,7 @@ void Renderer::TraceFrameSnapshot(){
         for(auto [level,count]:levels)out<<level<<":"<<count<<",";});
 }
 void Renderer::StartLivestream(){
+    m_settledPlanetCache.Invalidate();
     m_traceDrawIds.clear();m_traceRequestIds.clear();
     m_traceDrawStates.Clear();m_traceCameraStates.Clear();m_traceMatrixStates.Clear();
     m_trace.SetFrame(m_traceFrame);
@@ -382,6 +385,7 @@ void Renderer::StartLivestream(){
     m_scriptStatus=L"Log: "+m_trace.Path().filename().wstring();
     m_trace.Log([&](auto& out){out<<"SESSION scenario=Moon_View script=Manual_Exploration body=Moon radius_km=1737.4"
         <<" surface_root=\""<<Core::EnvironmentTrace::Escape(std::filesystem::path(m_surfaceRoot).string())<<"\""
+        <<" planet_optimizations="<<m_planetOptimizations
         <<" frame_cap_enabled="<<m_frameLimit.enabled<<" frame_cap_fps="<<m_frameLimit.fps<<" effective_frame_cap_fps="<<EffectiveFrameLimit()
         <<" indexed_dds="<<m_planet.files.size()<<" rejected_dds="<<m_planet.rejectedFiles
 #ifdef _DEBUG

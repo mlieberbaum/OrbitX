@@ -15,6 +15,7 @@ constexpr std::array<UINT,8> Palette={0xFF3030,0x00E5FF,0xFFE600,0xFF39DE,0x32FF
 double Milliseconds(std::chrono::steady_clock::time_point start){return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}
 }
 bool Renderer::InitPlanetStreaming() {
+    m_lastCollectedUploadFence=UINT64_MAX;m_settledPlanetCache.Invalidate();
     D3D12_COMMAND_QUEUE_DESC queue{};
     if(FAILED(m_device->CreateCommandQueue(&queue,IID_PPV_ARGS(&m_uploadQueue))) || FAILED(m_device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&m_uploadFence))))return false;
     for(auto& batch:m_uploadBatches) {
@@ -46,7 +47,9 @@ bool Renderer::QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatc
         batch.capacity=buffer.Width;
     }
     // Keep traversal coverage resident, and never recycle resources referenced by either queue.
-    std::set<UINT> pinned;for(const auto& draw:m_tileDraws)pinned.insert(draw.slot);
+    std::set<UINT> pinned;
+    if(!m_planetOptimizations || m_tileBytes+allocation>TileBudget || m_tiles.size()>=TileCapacity)
+        for(const auto& draw:m_tileDraws)pinned.insert(draw.slot);
     auto completed=m_fence->GetCompletedValue();
     while(m_tileBytes+allocation>TileBudget || m_tiles.size()>=TileCapacity) {
         auto oldest=m_tiles.end();
@@ -62,10 +65,16 @@ bool Renderer::QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatc
             <<" reason="<<(m_tileBytes+allocation>TileBudget?"CACHE_BYTES":"DESCRIPTOR_CAPACITY")<<" slot="<<oldest->second.slot
             <<" bytes="<<oldest->second.bytes<<" touched="<<oldest->second.touched<<" last_draw_fence="<<oldest->second.lastDrawFence
             <<" draw_fence_completed="<<completed<<" upload_fence="<<oldest->second.uploadFence<<" pinned=0 dependency=0";});
-        m_tileBytes-=oldest->second.bytes;m_tiles.erase(oldest);
+        m_tileBytes-=oldest->second.bytes;if(m_planetOptimizations)m_descriptorSlots.Release(oldest->second.slot);m_tiles.erase(oldest);
     }
-    std::set<UINT> used;for(const auto& [key,tile]:m_tiles)used.insert(tile.slot);
-    UINT slot=1;while(used.contains(slot))++slot;
+    UINT slot=0;
+    if(m_planetOptimizations){
+        slot=m_descriptorSlots.FindFree();
+        if(!slot){SetError("No free texture descriptor after safe eviction");return false;}
+    }else{
+        std::set<UINT> used;for(const auto& [key,tile]:m_tiles)used.insert(tile.slot);
+        slot=1;while(used.contains(slot))++slot;
+    }
     auto heap=PlanetHeap(D3D12_HEAP_TYPE_DEFAULT);ComPtr<ID3D12Resource> texture;
     if(FAILED(m_device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&texture)))){m_failedTiles.insert(id);SetError("DDS GPU allocation failed");return false;}
     size_t source=0;
@@ -81,7 +90,7 @@ bool Renderer::QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatc
     D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition.pResource=texture.Get();barrier.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_DEST;barrier.Transition.StateAfter=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;barrier.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;batch.commands->ResourceBarrier(1,&barrier);
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};srv.Format=desc.Format;srv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;srv.Texture2D.MipLevels=data.mips;
     auto handle=m_srvHeap->GetCPUDescriptorHandleForHeapStart();handle.ptr+=size_t(slot)*m_srvStride;m_device->CreateShaderResourceView(texture.Get(),&srv,handle);
-    m_tiles.emplace(id,TileResource{texture,slot,allocation,m_tileClock,0,0,false});m_tileBytes+=allocation;
+    m_tiles.emplace(id,TileResource{texture,slot,allocation,m_tileClock,0,0,false});if(m_planetOptimizations)m_descriptorSlots.MarkUsed(slot);m_tileBytes+=allocation;
     m_trace.Log([&](auto& out){out<<"TILE_UPLOAD_PREPARED tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" slot="<<slot
         <<" bytes="<<allocation<<" cache_bytes="<<m_tileBytes<<" width="<<data.width<<" height="<<data.height
         <<" mips="<<data.mips<<" format="<<data.format<<" batch_offset="<<batch.used<<" upload_bytes="<<total;});
@@ -100,6 +109,8 @@ bool Renderer::SubmitPlanetUploads(UploadBatch& batch) {
 }
 void Renderer::CollectPlanetUploads() {
     auto completed=m_uploadFence->GetCompletedValue();
+    if(m_planetOptimizations&&completed==m_lastCollectedUploadFence)return;
+    m_lastCollectedUploadFence=completed;
     for(auto& [id,tile]:m_tiles)if(!tile.ready && tile.uploadFence && tile.uploadFence<=completed){tile.ready=true;
         m_trace.Log([&](auto& out){out<<"TILE_ACTIVATE tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" slot="<<tile.slot
             <<" upload_fence="<<tile.uploadFence<<" upload_fence_completed="<<completed;});
@@ -119,6 +130,16 @@ bool Renderer::LoadPlanetTile(Core::TileId id) {
 bool Renderer::UpdatePlanet() {
     ++m_tileClock;CollectPlanetUploads();
     auto start=std::chrono::steady_clock::now();
+    const Core::PlanetFrameKey key{m_yaw,m_pitch,m_distanceKm,m_fov,m_width,m_height,m_planet.frozen,m_tiles.size(),m_planet.files.size(),m_uploadFenceValue};
+    const bool busy=!m_planet.requests.empty()||m_deferredTile.has_value()||!m_failedTiles.empty();
+    if(m_planetOptimizations&&m_settledPlanetCache.Reusable(key,m_planet.leaves,busy)){
+        // Preserve per-frame LRU touches even though selection/draw construction
+        // is unchanged. DrawPlanet still submits every patch and tracks fences.
+        for(auto* tile:m_settledTouchedTiles)tile->touched=m_tileClock;
+        m_selectMs=m_selectMs*.9+Milliseconds(start)*.1;m_uploadCpuMs*=.9;
+        return true;
+    }
+    m_settledPlanetCache.Invalidate();m_settledTouchedTiles.clear();
     auto camera=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm);
     const double tanY=std::tan(m_fov*Core::PlanetPi/360),aspect=double(m_width)/m_height;
     auto resident=[&](Core::TileId id){auto it=m_tiles.find(id);return (it!=m_tiles.end()&&it->second.ready)||m_failedTiles.contains(id);};
@@ -195,6 +216,12 @@ bool Renderer::UpdatePlanet() {
         draw.grid=static_cast<UINT>(std::min(3,id.level-4));m_tileDraws.push_back(draw);
     }
     for(const auto& [id,tile]:m_tiles)if(tile.ready)m_residentLOD=std::max(m_residentLOD,id.level);
+    if(m_planetOptimizations&&m_planet.requests.empty()&&!m_deferredTile&&m_failedTiles.empty()&&
+       std::all_of(m_tiles.begin(),m_tiles.end(),[](const auto& entry){return entry.second.ready;})){
+        m_settledTouchedTiles.reserve(m_tileDraws.size());
+        for(const auto& draw:m_tileDraws)m_settledTouchedTiles.push_back(&m_tiles.at(draw.source));
+        m_settledPlanetCache.Remember(key,m_planet.leaves);
+    }
     return true;
 }
 bool Renderer::BuildPlanetMesh() {

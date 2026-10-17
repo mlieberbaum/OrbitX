@@ -31,6 +31,7 @@ static std::string HrText(HRESULT hr){ char b[64]; sprintf_s(b,"HRESULT 0x%08X",
 void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<s<<"\n";m_trace.Log([&](auto& out){out<<"ERROR message=\""<<Core::EnvironmentTrace::Escape(s)<<"\"";});}
 
 bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hwnd=hwnd;m_width=w;m_height=h;m_root=root;
+ m_planetOptimizations=Core::LoadDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg").planetOptimizations;
  std::filesystem::path textureRoot;std::string textureError;
  if(!OrbitX::Core::LoadTextureRoot(std::filesystem::path(m_root),textureRoot,textureError)){SetError(textureError);return false;}
  std::filesystem::path surfaceRoot;
@@ -825,7 +826,7 @@ void Renderer::OnLeftClick(int x,int y){
 
 void Renderer::SaveUserPreferences(){
  CommitFrameCapInput();
- if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync,m_frameLimit.enabled,m_frameLimit.fps}))SetError("Cannot save display preferences");
+ if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync,m_frameLimit.enabled,m_frameLimit.fps,m_planetOptimizations}))SetError("Cannot save display preferences");
 }
 void Renderer::SetFrameLimit(bool enabled,unsigned fps){
  m_frameLimit={enabled,fps>=Core::FrameLimit::MinFPS&&fps<=Core::FrameLimit::MaxFPS?fps:Core::FrameLimit::DefaultFPS};
