@@ -359,3 +359,35 @@ with VSync off and without opening Ctrl+R or changing display settings during th
 run. Compare each script/view against itself; different script signatures are
 not before/after measurements. Remember that loading_us includes the required
 two-second stability confirmation and Windows' disk cache is uncontrolled.
+
+
+### Optional frame-rate limit
+
+Graphics now provides CAPPED / UNCAPPED radio controls and an FPS field
+(1–10000, remembered value initially 120). Uncapped is the default for existing
+preferences. Click the field to replace its value, type digits and press Enter
+or click elsewhere to apply; Ctrl+A selects all, Backspace edits, and Escape
+cancels. Invalid/empty/out-of-range input restores the previous valid value.
+Uncapped disables the field and keeps its value for later use.
+
+The mode and value are saved on normal exit in Runtime/Config/UserPreferences.cfg
+as FrameRateLimit=Capped/Uncapped and MaxFPS=<integer>, alongside display mode,
+VSync and any unrelated preferences. Existing display/VSync saves also preserve
+these fields. A high-resolution waitable timer sleeps between frame starts;
+Windows input wakes the wait so low caps do not block menu interaction. Slow
+frames do not trigger catch-up bursts. Uncapped frames do not wait on the timer.
+
+Benchmark recording and playback bypass the application cap for their entire
+active session, including loading, then automatically resume the saved cap on
+completion, cancellation, scenario exit or failure. Full, Regression and None
+retain the selected limit. VSync remains independent: turn it off for uncapped
+benchmark measurements. Regression and performance file formats are unchanged;
+Full session headers include the frame-cap settings. Tile selection, streaming,
+cache policy, shaders and draw submission are unchanged.
+
+FrameLimiterTests.cpp covers pacing, rate changes, stalls, benchmark bypass,
+preference persistence/defaults/malformed values and scaled control hit-testing.
+Rebuild Env_Test_Release in Visual Studio, select Capped / 120 and verify FPS;
+run a Benchmark script and confirm uncapped FPS and restoration after finish/stop.
+Exit/relaunch to confirm persistence, test Uncapped's disabled field, and compare
+Regression output to the existing baseline.

@@ -27,6 +27,7 @@
 #include "../Core/TileOverlay.h"
 #include "../Core/PlanetFrameCache.h"
 #include "../Core/DescriptorSlots.h"
+#include "../Core/FrameLimiter.h"
 
 namespace OrbitX::Graphics {
 class Renderer {
@@ -49,7 +50,12 @@ public:
     bool IsFullscreen() const { return m_fullscreen; }
     void SetVSync(bool enabled);
     bool IsVSync() const { return m_vsync; }
+    void SetFrameLimit(bool enabled,unsigned fps);
+    unsigned EffectiveFrameLimit()const {return m_frameLimit.Effective(m_scriptOperation!=ScriptOperation::Idle&&m_scriptLogging==ScriptLogging::Benchmark);}
+    void SaveUserPreferences();
 private:
+    void CommitFrameCapInput(bool accept=true);
+    bool FrameCapCharacter(wchar_t character);
     static constexpr UINT FrameCount=2;
     struct Vertex { DirectX::XMFLOAT3 pos, normal; DirectX::XMFLOAT2 uv; };
     struct SceneCB { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 model; DirectX::XMFLOAT4 sunDir; };
@@ -245,9 +251,12 @@ private:
     bool m_solarSystemExpanded=false;
     bool m_scenarioSelected=false;
     int m_scenarioHover=-1; // 0: category, 1: Moon View, 2: Launch
-    int m_graphicsHover=-1; // 0: WINDOWED, 1: FULL SCREEN, 2: VSync off, 3: VSync on, -1: neither
+    int m_graphicsHover=-1; // Display/VSync: 0..3; cap controls: 4..6; -1: none
     bool m_mouseNavigation=false;
     bool m_vsync=false,m_tearingSupported=false;
+    Core::FrameLimit m_frameLimit;
+    bool m_frameCapFocused=false,m_frameCapReplace=false;
+    std::wstring m_frameCapText=std::to_wstring(Core::FrameLimit::DefaultFPS);
     bool m_fullscreen=false; WINDOWPLACEMENT m_windowedPlacement{sizeof(WINDOWPLACEMENT)}; DWORD m_windowedStyle=WS_OVERLAPPEDWINDOW;
     bool m_drag=false; POINT m_dragAnchorScreen{};
 };

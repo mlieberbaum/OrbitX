@@ -581,8 +581,27 @@ void Renderer::DrawHudText(){
        drawFmt(L"VSYNC",subLayout.title.left,subLayout.graphicsVsyncOff.top-65,m_textLeft.Get(),white.Get());
        drawDisplayOption(subLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
        drawDisplayOption(subLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
-       drawFmt(L"OFF: no application frame-rate cap.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+25,m_textLeft.Get(),white.Get());
+       drawFmt(L"VSync follows the monitor refresh rate.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+25,m_textLeft.Get(),white.Get());
        drawFmt(L"Settings are saved automatically.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+60,m_textLeft.Get(),white.Get());
+       drawFmt(L"FRAME RATE LIMIT",subLayout.graphicsCapped.left,subLayout.graphicsCapped.top-65,m_textLeft.Get(),white.Get());
+       auto radio=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool selected,bool hovered){
+         const auto center=D2D1::Point2F(r.left+14,(r.top+r.bottom)*.5f);
+         auto* brush=selected||hovered?green.Get():white.Get();
+         m_d2dContext->DrawEllipse(D2D1::Ellipse(center,10,10),brush,1.5f);
+         if(selected)m_d2dContext->FillEllipse(D2D1::Ellipse(center,5,5),green.Get());
+         centeredButtonText(label,r,r.left+38,m_textLeft.Get(),brush,.8f);
+       };
+       radio(subLayout.graphicsCapped,L"CAPPED",m_frameLimit.enabled,m_graphicsHover==4);
+       radio(subLayout.graphicsUncapped,L"UNCAPPED",!m_frameLimit.enabled,m_graphicsHover==5);
+       const auto& input=subLayout.graphicsCapInput;
+       auto* inputBrush=m_frameLimit.enabled?green.Get():muted.Get();
+       drawFmt(L"FPS (1 - 10000)",input.left,input.top-48,m_textLeft.Get(),m_frameLimit.enabled?white.Get():muted.Get());
+       m_d2dContext->FillRectangle(D2D1::RectF(input.left,input.top,input.right,input.bottom),glass.Get());
+       m_d2dContext->DrawRectangle(D2D1::RectF(input.left,input.top,input.right,input.bottom),inputBrush,m_frameCapFocused?2.0f:1.0f);
+       if(m_frameCapFocused&&m_frameCapReplace)m_d2dContext->FillRectangle(D2D1::RectF(input.left+10,input.top+8,input.right-10,input.bottom-8),greenFill.Get());
+       auto value=m_frameCapText+(m_frameCapFocused?L"_":L"");
+       centeredButtonText(value.c_str(),input,input.left+20,m_textLeft.Get(),inputBrush,0);
+       drawFmt(L"Benchmark mode temporarily bypasses this limit.",input.left,input.bottom+30,m_textLeft.Get(),white.Get());
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -749,6 +768,11 @@ void Renderer::Resize(UINT width,UINT height){
  if(log)log<<"Resize: client="<<m_width<<"x"<<m_height<<" swapchain="<<m_width<<"x"<<m_height<<" aspect="<<(double(m_width)/double(m_height))<<"\n";
 }
 void Renderer::OnKeyDown(WPARAM k){
+ if(m_appState==AppState::Graphics&&m_frameCapFocused){
+   if(k=='A'&&(GetKeyState(VK_CONTROL)&0x8000)){m_frameCapReplace=true;return;}
+   if(k==VK_ESCAPE){CommitFrameCapInput(false);return;}
+   if(k==VK_TAB){CommitFrameCapInput();return;}
+ }
  m_trace.Log([&](auto& out){out<<"INPUT_KEY key="<<k<<" ctrl="<<bool(GetKeyState(VK_CONTROL)&0x8000);});
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
    if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;m_scriptNameFocused=false;if(m_scriptPanelOpen&&m_scriptOperation==ScriptOperation::Idle)RefreshScripts();TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
@@ -778,6 +802,7 @@ void Renderer::OnLeftClick(int x,int y){
    if(hit>=0){m_menuSelection=hit;OnKeyDown(VK_RETURN);} return;
  }
  const auto layout=OrbitX::UI::BuildSubmenuLayout((float)m_width,(float)m_height);
+ if(m_appState==AppState::Graphics)CommitFrameCapInput();
  if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;return;}
  if(m_appState==AppState::ScenarioSelect){
    const auto hit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
@@ -791,14 +816,47 @@ void Renderer::OnLeftClick(int x,int y){
    else if(OrbitX::UI::HitTestButton(layout.graphicsFullscreen,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(true);
    else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOff,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(false);
    else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOn,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(true);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsCapped,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFrameLimit(true,m_frameLimit.fps);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsUncapped,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFrameLimit(false,m_frameLimit.fps);
+   else if(m_frameLimit.enabled&&OrbitX::UI::HitTestButton(layout.graphicsCapInput,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_frameCapFocused=true;m_frameCapReplace=true;}
  }
 }
 
 
+void Renderer::SaveUserPreferences(){
+ CommitFrameCapInput();
+ if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync,m_frameLimit.enabled,m_frameLimit.fps}))SetError("Cannot save display preferences");
+}
+void Renderer::SetFrameLimit(bool enabled,unsigned fps){
+ m_frameLimit={enabled,fps>=Core::FrameLimit::MinFPS&&fps<=Core::FrameLimit::MaxFPS?fps:Core::FrameLimit::DefaultFPS};
+ m_frameCapText=std::to_wstring(m_frameLimit.fps);m_frameCapFocused=false;m_frameCapReplace=false;
+ m_trace.Log([&](auto& out){out<<"FRAME_RATE_LIMIT enabled="<<enabled<<" fps="<<m_frameLimit.fps;});
+}
+void Renderer::CommitFrameCapInput(bool accept){
+ if(!m_frameCapFocused)return;
+ unsigned fps=m_frameLimit.fps;
+ const std::string text(m_frameCapText.begin(),m_frameCapText.end());
+ if(accept&&Core::ParseFrameLimit(text,fps))SetFrameLimit(m_frameLimit.enabled,fps);
+ else{m_frameCapText=std::to_wstring(m_frameLimit.fps);m_frameCapFocused=false;m_frameCapReplace=false;}
+}
+bool Renderer::FrameCapCharacter(wchar_t c){
+ if(m_appState!=AppState::Graphics||!m_frameCapFocused||!m_frameLimit.enabled)return false;
+ if(c==L'\r'){CommitFrameCapInput();return true;}
+ if(c==L'\b'){
+   if(m_frameCapReplace)m_frameCapText.clear();else if(!m_frameCapText.empty())m_frameCapText.pop_back();
+   m_frameCapReplace=false;return true;
+ }
+ if(c>=L'0'&&c<=L'9'){
+   if(m_frameCapReplace)m_frameCapText.clear();
+   m_frameCapReplace=false;
+   if(m_frameCapText.size()<5)m_frameCapText+=c;
+ }
+ return true;
+}
 void Renderer::SetVSync(bool enabled){
  m_vsync=enabled;
  m_trace.Log([&](auto& out){out<<"VSYNC enabled="<<enabled;});
- if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
+ SaveUserPreferences();
 }
 void Renderer::SetFullscreen(bool enabled){
  if(enabled==m_fullscreen)return;
@@ -812,7 +870,7 @@ void Renderer::SetFullscreen(bool enabled){
  }else{
    SetWindowLongPtr(m_hwnd,GWL_STYLE,m_windowedStyle);SetWindowPlacement(m_hwnd,&m_windowedPlacement);SetWindowPos(m_hwnd,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);m_fullscreen=false;
  }
- if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
+ SaveUserPreferences();
 }
 void Renderer::OnMouseDown(int,int){
  if(m_appState!=AppState::Simulation||m_drag||m_scriptPanelOpen||m_scriptOperation==ScriptOperation::Playing)return;
@@ -848,6 +906,9 @@ void Renderer::OnMouseMove(int x,int y){
      else if(hit(layout.graphicsFullscreen))m_graphicsHover=1;
      else if(hit(layout.graphicsVsyncOff))m_graphicsHover=2;
      else if(hit(layout.graphicsVsyncOn))m_graphicsHover=3;
+     else if(hit(layout.graphicsCapped))m_graphicsHover=4;
+     else if(hit(layout.graphicsUncapped))m_graphicsHover=5;
+     else if(m_frameLimit.enabled&&hit(layout.graphicsCapInput))m_graphicsHover=6;
    }
    if(m_appState==AppState::ScenarioSelect){
      if(hit(layout.solarSystem))m_scenarioHover=0;

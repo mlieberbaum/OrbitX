@@ -80,4 +80,34 @@ SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 CoInitializeEx(nullptr,COINIT_MULTITHREADED);std::wstring runtime=std::filesystem::current_path().wstring();std::filesystem::create_directories(runtime+L"\\Logs");const auto userPrefsPath=std::filesystem::path(runtime)/L"Config"/L"UserPreferences.cfg";const auto preferences=OrbitX::Core::LoadDisplayPreferences(userPrefsPath);WNDCLASSEX wc{sizeof(wc),CS_HREDRAW|CS_VREDRAW,WndProc,0,0,hi,LoadIcon(nullptr,IDI_APPLICATION),LoadCursor(nullptr,IDC_ARROW),(HBRUSH)GetStockObject(BLACK_BRUSH),nullptr,L"OrbitXWindow",nullptr};RegisterClassEx(&wc);RECT r{0,0,1920,1080};AdjustWindowRectExForDpi(&r,WS_OVERLAPPEDWINDOW,FALSE,0,GetDpiForSystem());HWND h=CreateWindowEx(0,wc.lpszClassName,L"OrbitX 0.25",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,r.right-r.left,r.bottom-r.top,nullptr,nullptr,hi,nullptr);if(!h){CoUninitialize();return 1;}ShowWindow(h,SW_SHOW);UpdateWindow(h);RECT client{};GetClientRect(h,&client);UINT clientW=(UINT)(client.right-client.left),clientH=(UINT)(client.bottom-client.top);
 Renderer renderer;g_renderer=&renderer;if(!renderer.Initialize(h,clientW,clientH,runtime)){MessageBoxA(h,renderer.LastError().c_str(),"OrbitX initialization failed",MB_OK|MB_ICONERROR);DestroyWindow(h);g_renderer=nullptr;CoUninitialize();return 2;}
 // Display preference comes from auto-created, untracked UserPreferences.cfg.
-renderer.SetFullscreen(preferences.fullscreen);renderer.SetVSync(preferences.vsync);auto last=std::chrono::steady_clock::now();MSG msg{};while(msg.message!=WM_QUIT){if(PeekMessage(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessage(&msg);}else{auto now=std::chrono::steady_clock::now();float dt=std::chrono::duration<float>(now-last).count();last=now;renderer.Update(dt);renderer.Render();}}OrbitX::Core::SaveDisplayPreferences(userPrefsPath,{renderer.IsFullscreen(),renderer.IsVSync()});renderer.Shutdown();g_renderer=nullptr;CoUninitialize();return 0;}
+renderer.SetFrameLimit(preferences.frameCapEnabled,preferences.frameCap);
+renderer.SetFullscreen(preferences.fullscreen);renderer.SetVSync(preferences.vsync);
+// Waitable timer sleeps until the next capped frame; input wakes it immediately.
+// Fall back on older systems without high-resolution waitable timers.
+HANDLE frameTimer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_MODIFY_STATE|SYNCHRONIZE);
+if(!frameTimer)frameTimer=CreateWaitableTimerW(nullptr,FALSE,nullptr);
+OrbitX::Core::FramePacer framePacer;
+auto last=std::chrono::steady_clock::now();MSG msg{};
+while(msg.message!=WM_QUIT){
+    if(PeekMessage(&msg,nullptr,0,0,PM_REMOVE)){
+        TranslateMessage(&msg);DispatchMessage(&msg);
+    }else{
+        auto now=std::chrono::steady_clock::now();
+        const auto nowNs=std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+        const unsigned fps=renderer.EffectiveFrameLimit();
+        const auto delayNs=framePacer.Delay(nowNs,fps);
+        if(delayNs>0){
+            LARGE_INTEGER due{};due.QuadPart=-((delayNs+99)/100);
+            if(frameTimer&&SetWaitableTimer(frameTimer,&due,0,nullptr,nullptr,FALSE))
+                MsgWaitForMultipleObjectsEx(1,&frameTimer,INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+            else MsgWaitForMultipleObjectsEx(0,nullptr,static_cast<DWORD>((delayNs+999999)/1000000),QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+            continue;
+        }
+        framePacer.Begin(nowNs,fps);
+        float dt=std::chrono::duration<float>(now-last).count();last=now;
+        renderer.Update(dt);renderer.Render();
+    }
+}
+if(frameTimer)CloseHandle(frameTimer);
+renderer.SaveUserPreferences();renderer.Shutdown();g_renderer=nullptr;CoUninitialize();return 0;
+}

@@ -99,6 +99,7 @@ void Renderer::RefreshScripts(){
     }catch(const std::exception& e){SetError(e.what());m_scriptStatus=L"Cannot read Runtime/Scripts";}
 }
 void Renderer::OnCharacter(wchar_t c){
+    if(FrameCapCharacter(c))return;
     if(m_appState!=AppState::Simulation||!m_scriptPanelOpen||!m_recordTab||!m_scriptNameFocused||m_scriptOperation!=ScriptOperation::Idle)return;
     if(c==L'\b'){if(!m_scriptName.empty())m_scriptName.pop_back();return;}
     if(c==L'\r'){m_scriptNameFocused=false;return;}
@@ -384,6 +385,7 @@ void Renderer::StartLivestream(){
     m_scriptStatus=L"Log: "+m_trace.Path().filename().wstring();
     m_trace.Log([&](auto& out){out<<"SESSION scenario=Moon_View script=Manual_Exploration body=Moon radius_km=1737.4"
         <<" surface_root=\""<<Core::EnvironmentTrace::Escape(std::filesystem::path(m_surfaceRoot).string())<<"\""
+        <<" frame_cap_enabled="<<m_frameLimit.enabled<<" frame_cap_fps="<<m_frameLimit.fps<<" effective_frame_cap_fps="<<EffectiveFrameLimit()
         <<" indexed_dds="<<m_planet.files.size()<<" rejected_dds="<<m_planet.rejectedFiles
 #ifdef _DEBUG
         <<" debug_build=1"
