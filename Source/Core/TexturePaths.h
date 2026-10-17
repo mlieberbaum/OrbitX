@@ -41,42 +41,32 @@ inline bool LoadTextureRoot(const std::filesystem::path& runtimeRoot,
 }
 
     
-// Moon.cfg is the single source of truth for the Moon image's relative path.
-// Both the globe renderer and scenario preview consume this resolved path.
-inline bool LoadMoonTexturePath(const std::filesystem::path& runtimeRoot,
-                               const std::filesystem::path& textureRoot,
-                               std::filesystem::path& moonTexture,
-                               std::string& error) {
-    const auto configPath = runtimeRoot / L"Config" / L"Bodies" / L"Moon.cfg";
+// Each body's surface hierarchy can live independently of the shared texture root.
+inline bool LoadBodySurfacePath(const std::filesystem::path& runtimeRoot,
+                                const std::filesystem::path& textureRoot,
+                                const std::string& body,
+                                std::filesystem::path& surfaceRoot,
+                                std::string& error) {
+    const auto configPath=runtimeRoot / "Config" / "Bodies" / (body+".cfg");
     std::ifstream config(configPath);
-    if (!config) {
-        error = "Cannot open Runtime/Config/Bodies/Moon.cfg.";
-        return false;
-    }
+    if(!config){error="Cannot open body configuration: "+configPath.string();return false;}
+    surfaceRoot=textureRoot/body/"Surf";
     std::string line;
-    while (std::getline(config, line)) {
-        const auto first = line.find_first_not_of(" \t\r");
-        if (first == std::string::npos || line[first] == '#' || line[first] == ';')
-            continue;
-        const auto equals = line.find('=', first);
-        if (equals == std::string::npos) continue;
-        auto keyEnd = line.find_last_not_of(" \t", equals - 1);
-        if (keyEnd == std::string::npos || line.substr(first, keyEnd - first + 1) != "Texture")
-            continue;
-        const auto valueStart = line.find_first_not_of(" \t", equals + 1);
-        if (valueStart == std::string::npos) break;
-        const auto valueEnd = line.find_last_not_of(" \t\r");
-        auto configured = std::filesystem::path(line.substr(valueStart, valueEnd - valueStart + 1));
-        moonTexture = (configured.is_absolute() ? configured : textureRoot / configured).lexically_normal();
-        if (!std::filesystem::is_regular_file(moonTexture)) {
-            error = "Moon texture not found: " + moonTexture.string()
-                  + ". Check Texture in Runtime/Config/Bodies/Moon.cfg.";
-            return false;
-        }
-        return true;
+    while(std::getline(config,line)) {
+        auto first=line.find_first_not_of(" \t\r");
+        if(first==std::string::npos || line[first]=='#' || line[first]==';')continue;
+        auto equals=line.find('=',first);if(equals==std::string::npos || equals==first)continue;
+        auto end=line.find_last_not_of(" \t",equals-1);
+        if(end==std::string::npos || line.substr(first,end-first+1)!="SurfaceTiles")continue;
+        auto begin=line.find_first_not_of(" \t\r",equals+1),last=line.find_last_not_of(" \t\r");
+        if(begin==std::string::npos){error="SurfaceTiles is empty in "+configPath.string();return false;}
+        auto configured=std::filesystem::path(line.substr(begin,last-begin+1));
+        surfaceRoot=(configured.is_absolute()?configured:textureRoot/configured).lexically_normal();
+        break;
     }
-    error = "Texture is missing or empty in Runtime/Config/Bodies/Moon.cfg.";
-    return false;
+    if(!std::filesystem::is_directory(surfaceRoot)) {
+        error="DDS surface folder does not exist: "+surfaceRoot.string()+". Set SurfaceTiles in "+configPath.string();return false;
+    }
+    return true;
 }
-
 } // namespace OrbitX::Core

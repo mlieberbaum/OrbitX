@@ -1,6 +1,9 @@
 #include "Renderer.h"
 #include "../Core/MenuLayout.h"
 #include "../Core/TexturePaths.h"
+#include "../Core/DisplayPreferences.h"
+#include "../Core/PlanetZoom.h"
+#include "../Core/ScriptPanelLayout.h"
 #include <d3dcompiler.h>
 #include <wincodec.h>
 #include <algorithm>
@@ -25,79 +28,63 @@ namespace OrbitX::Graphics {
 static D3D12_HEAP_PROPERTIES Heap(D3D12_HEAP_TYPE t){ D3D12_HEAP_PROPERTIES h{}; h.Type=t; return h; }
 static D3D12_RESOURCE_DESC BufferDesc(UINT64 n){ D3D12_RESOURCE_DESC d{}; d.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER; d.Width=n; d.Height=1; d.DepthOrArraySize=1; d.MipLevels=1; d.SampleDesc.Count=1; d.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR; return d; }
 static std::string HrText(HRESULT hr){ char b[64]; sprintf_s(b,"HRESULT 0x%08X",(unsigned)hr); return b; }
-void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<s<<"\n";}
+void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<s<<"\n";m_trace.Log([&](auto& out){out<<"ERROR message=\""<<Core::EnvironmentTrace::Escape(s)<<"\"";});}
 
 bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hwnd=hwnd;m_width=w;m_height=h;m_root=root;
  std::filesystem::path textureRoot;std::string textureError;
  if(!OrbitX::Core::LoadTextureRoot(std::filesystem::path(m_root),textureRoot,textureError)){SetError(textureError);return false;}
- std::filesystem::path moonTexture; 
- if(!OrbitX::Core::LoadMoonTexturePath(std::filesystem::path(m_root),textureRoot,moonTexture,textureError)){SetError(textureError);return false;}
- m_moonTexturePath=moonTexture.wstring();
+ std::filesystem::path surfaceRoot;
+ if(!OrbitX::Core::LoadBodySurfacePath(m_root,textureRoot,"Moon",surfaceRoot,textureError)){SetError(textureError);return false;}
+ m_surfaceRoot=surfaceRoot.wstring();
+ try {m_planet.Scan(surfaceRoot);}
+ catch(const std::exception& e){SetError(std::string("Cannot index DDS folder: ")+e.what());return false;}
+ for(int column=0;column<2;column++)if(!m_planet.files.contains({4,0,column})) {
+   SetError("Missing level 04 DDS root in "+surfaceRoot.string()+"; expected 04/000000/000000.dds and 000001.dds. JPG fallback is disabled.");return false;
+ }
+ std::ofstream(std::filesystem::path(m_root)/L"Logs"/L"OrbitX.log",std::ios::app)<<"DDS surface root "<<surfaceRoot.string()<<", indexed "<<m_planet.files.size()<<", rejected "<<m_planet.rejectedFiles<<"\n";
 #if defined(_DEBUG)
  ComPtr<ID3D12Debug> dbg; if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer();
 #endif
- if(!InitDevice()||!InitAssets()) return false; return true; }
+ if(!InitDevice()||!InitAssets()) return false; m_tileLoader.SetTrace(&m_trace);m_tileLoader.Start(); return true; }
 
 bool Renderer::InitDevice(){ HRESULT hr=CreateDXGIFactory2(0,IID_PPV_ARGS(&m_factory)); if(FAILED(hr)){SetError("CreateDXGIFactory2: "+HrText(hr));return false;}
  ComPtr<IDXGIAdapter1>a; for(UINT i=0;m_factory->EnumAdapters1(i,&a)!=DXGI_ERROR_NOT_FOUND;i++){DXGI_ADAPTER_DESC1 d{};a->GetDesc1(&d);if(d.Flags&DXGI_ADAPTER_FLAG_SOFTWARE){a.Reset();continue;} if(SUCCEEDED(D3D12CreateDevice(a.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&m_device))))break;a.Reset();}
  if(!m_device && FAILED(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&m_device)))){SetError("No D3D12 device.");return false;}
  D3D12_COMMAND_QUEUE_DESC q{}; if(FAILED(m_device->CreateCommandQueue(&q,IID_PPV_ARGS(&m_queue))))return false;
- DXGI_SWAP_CHAIN_DESC1 sd{};sd.BufferCount=FrameCount;sd.Width=m_width;sd.Height=m_height;sd.Format=DXGI_FORMAT_R8G8B8A8_UNORM;sd.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;sd.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;sd.SampleDesc.Count=1;
+ BOOL allowTearing=FALSE;
+ m_tearingSupported=SUCCEEDED(m_factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING,&allowTearing,sizeof(allowTearing))) && allowTearing;
+ DXGI_SWAP_CHAIN_DESC1 sd{};sd.BufferCount=FrameCount;sd.Width=m_width;sd.Height=m_height;sd.Format=DXGI_FORMAT_R8G8B8A8_UNORM;sd.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;sd.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;sd.SampleDesc.Count=1;sd.Flags=m_tearingSupported?DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING:0;
  ComPtr<IDXGISwapChain1>s1; if(FAILED(m_factory->CreateSwapChainForHwnd(m_queue.Get(),m_hwnd,&sd,nullptr,nullptr,&s1)))return false;s1.As(&m_swap);m_factory->MakeWindowAssociation(m_hwnd,DXGI_MWA_NO_ALT_ENTER);m_frame=m_swap->GetCurrentBackBufferIndex();
  D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.NumDescriptors=FrameCount;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_rtvHeap));m_rtvStride=m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
  auto r=m_rtvHeap->GetCPUDescriptorHandleForHeapStart();for(UINT i=0;i<FrameCount;i++){m_swap->GetBuffer(i,IID_PPV_ARGS(&m_back[i]));m_device->CreateRenderTargetView(m_back[i].Get(),nullptr,r);r.ptr+=m_rtvStride;m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&m_alloc[i]));}
- hd={};hd.NumDescriptors=1;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_srvHeap));
+ hd={};hd.NumDescriptors=TileCapacity+1;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_srvHeap));
+ m_srvStride=m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
  hd={};hd.NumDescriptors=1;hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_DSV;m_device->CreateDescriptorHeap(&hd,IID_PPV_ARGS(&m_dsvHeap));
  m_device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,m_alloc[m_frame].Get(),nullptr,IID_PPV_ARGS(&m_cmd));m_cmd->Close();m_device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&m_fence));m_fenceEvent=CreateEvent(nullptr,FALSE,FALSE,nullptr);return m_fenceEvent!=nullptr; }
 
 static bool Compile(const std::wstring&p,const char*entry,const char*target,ComPtr<ID3DBlob>&out,std::string&err){ComPtr<ID3DBlob>e;UINT f=D3DCOMPILE_ENABLE_STRICTNESS;
 #if defined(_DEBUG)
  f|=D3DCOMPILE_DEBUG|D3DCOMPILE_SKIP_OPTIMIZATION;
+#else
+ f|=D3DCOMPILE_OPTIMIZATION_LEVEL3;
 #endif
- HRESULT hr=D3DCompileFromFile(p.c_str(),nullptr,D3D_COMPILE_STANDARD_FILE_INCLUDE,entry,target,f,0,&out,&e);if(FAILED(hr)){err=e?(char*)e->GetBufferPointer():HrText(hr);return false;}return true;}
+ const D3D_SHADER_MACRO macros[]={
+#ifdef PLANET_DEBUG_MODE
+ {"PLANET_DEBUG_MODE","1"},
+#endif
+ {nullptr,nullptr}};
+ HRESULT hr=D3DCompileFromFile(p.c_str(),macros,D3D_COMPILE_STANDARD_FILE_INCLUDE,entry,target,f,0,&out,&e);if(FAILED(hr)){err=e?(char*)e->GetBufferPointer():HrText(hr);return false;}return true;}
 
 bool Renderer::CreateScenePipeline(){ComPtr<ID3DBlob>vs,ps,rs;std::string e;auto p=m_root+L"\\Shaders\\Moon.hlsl";if(!Compile(p,"VSMain","vs_5_1",vs,e)||!Compile(p,"PSMain","ps_5_1",ps,e)){SetError(e);return false;}
- D3D12_DESCRIPTOR_RANGE range{};range.RangeType=D3D12_DESCRIPTOR_RANGE_TYPE_SRV;range.NumDescriptors=1;range.BaseShaderRegister=0;D3D12_ROOT_PARAMETER rp[2]{};rp[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;rp[0].Descriptor.ShaderRegister=0;rp[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;rp[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;rp[1].DescriptorTable.NumDescriptorRanges=1;rp[1].DescriptorTable.pDescriptorRanges=&range;rp[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
- D3D12_STATIC_SAMPLER_DESC samp{};samp.Filter=D3D12_FILTER_ANISOTROPIC;samp.MaxAnisotropy=16;samp.AddressU=D3D12_TEXTURE_ADDRESS_MODE_WRAP;samp.AddressV=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.MaxLOD=D3D12_FLOAT32_MAX;samp.ShaderRegister=0;samp.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
- D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=2;rd.pParameters=rp;rd.NumStaticSamplers=1;rd.pStaticSamplers=&samp;rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;ComPtr<ID3DBlob>re;D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&rs,&re);m_device->CreateRootSignature(0,rs->GetBufferPointer(),rs->GetBufferSize(),IID_PPV_ARGS(&m_sceneRoot));
+ D3D12_DESCRIPTOR_RANGE range{};range.RangeType=D3D12_DESCRIPTOR_RANGE_TYPE_SRV;range.NumDescriptors=1;range.BaseShaderRegister=0;D3D12_ROOT_PARAMETER rp[3]{};rp[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_CBV;rp[0].Descriptor.ShaderRegister=0;rp[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;rp[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;rp[1].DescriptorTable.NumDescriptorRanges=1;rp[1].DescriptorTable.pDescriptorRanges=&range;rp[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+ rp[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;rp[2].Constants.ShaderRegister=1;rp[2].Constants.Num32BitValues=16;rp[2].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
+ D3D12_STATIC_SAMPLER_DESC samp{};samp.Filter=D3D12_FILTER_ANISOTROPIC;samp.MaxAnisotropy=16;samp.AddressU=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.AddressV=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;samp.MaxLOD=D3D12_FLOAT32_MAX;samp.ShaderRegister=0;samp.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+ D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=3;rd.pParameters=rp;rd.NumStaticSamplers=1;rd.pStaticSamplers=&samp;rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;ComPtr<ID3DBlob>re;D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&rs,&re);m_device->CreateRootSignature(0,rs->GetBufferPointer(),rs->GetBufferSize(),IID_PPV_ARGS(&m_sceneRoot));
  D3D12_INPUT_ELEMENT_DESC il[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0}};
- D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};d.pRootSignature=m_sceneRoot.Get();d.VS={vs->GetBufferPointer(),vs->GetBufferSize()};d.PS={ps->GetBufferPointer(),ps->GetBufferSize()};d.InputLayout={il,3};d.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;d.RTVFormats[0]=DXGI_FORMAT_R8G8B8A8_UNORM;d.NumRenderTargets=1;d.DSVFormat=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.SampleMask=UINT_MAX;d.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;d.RasterizerState.CullMode=D3D12_CULL_MODE_BACK;d.RasterizerState.FrontCounterClockwise=FALSE;d.RasterizerState.DepthClipEnable=TRUE;d.BlendState.RenderTarget[0].RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;d.DepthStencilState.DepthEnable=TRUE;d.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;d.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS;return SUCCEEDED(m_device->CreateGraphicsPipelineState(&d,IID_PPV_ARGS(&m_scenePSO))); }
-
-bool Renderer::CreateSphere(){const int lon=256,lat=128;std::vector<Vertex>v;std::vector<uint32_t>idx;v.reserve((lon+1)*(lat+1));for(int j=0;j<=lat;j++){float vv=float(j)/lat;float phi=XM_PIDIV2-vv*XM_PI;for(int i=0;i<=lon;i++){float u=float(i)/lon;float lam=(u-.5f)*XM_2PI;float cp=cosf(phi);XMFLOAT3 n{cp*cosf(lam),sinf(phi),cp*sinf(lam)};v.push_back({n,n,{u,vv}});}}for(int j=0;j<lat;j++)for(int i=0;i<lon;i++){uint32_t a=j*(lon+1)+i,b=a+1,c=a+lon+1,d=c+1;idx.insert(idx.end(),{a,c,b,b,c,d});}m_indexCount=(UINT)idx.size();UINT vbBytes=(UINT)(v.size()*sizeof(Vertex)),ibBytes=(UINT)(idx.size()*4);auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto bd=BufferDesc(vbBytes);m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_vb));void*p;m_vb->Map(0,nullptr,&p);memcpy(p,v.data(),vbBytes);m_vb->Unmap(0,nullptr);bd=BufferDesc(ibBytes);m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_ib));m_ib->Map(0,nullptr,&p);memcpy(p,idx.data(),ibBytes);m_ib->Unmap(0,nullptr);m_vbv={m_vb->GetGPUVirtualAddress(),vbBytes,sizeof(Vertex)};m_ibv={m_ib->GetGPUVirtualAddress(),ibBytes,DXGI_FORMAT_R32_UINT};return true;}
-
-bool Renderer::LoadTextureWIC(const std::wstring&path){
- ComPtr<IWICImagingFactory>f;HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
- if(FAILED(hr)){SetError("WIC factory failed");return false;}
- ComPtr<IWICBitmapDecoder>d;hr=f->CreateDecoderFromFilename(path.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d);
- if(FAILED(hr)){SetError("Cannot open external Moon texture: "+std::filesystem::path(path).string()+". Check TextureRoot in OrbitX.cfg and Texture in Bodies/Moon.cfg.");return false;}
- ComPtr<IWICBitmapFrameDecode>fr;d->GetFrame(0,&fr);UINT sw,sh;fr->GetSize(&sw,&sh);
- UINT tw=sw,th=sh;const UINT maxW=8192;ComPtr<IWICBitmapSource>src=fr;
- if(sw>maxW){tw=maxW;th=(UINT)((uint64_t)sh*tw/sw);ComPtr<IWICBitmapScaler>sc;f->CreateBitmapScaler(&sc);sc->Initialize(fr.Get(),tw,th,WICBitmapInterpolationModeFant);src=sc;}
- ComPtr<IWICFormatConverter>cv;f->CreateFormatConverter(&cv);cv->Initialize(src.Get(),GUID_WICPixelFormat32bppRGBA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom);
- std::vector<std::vector<uint8_t>> mipData;std::vector<UINT> mipW,mipH;
- mipW.push_back(tw);mipH.push_back(th);mipData.emplace_back((size_t)tw*th*4);cv->CopyPixels(nullptr,tw*4,(UINT)mipData[0].size(),mipData[0].data());
- while(mipW.back()>1||mipH.back()>1){
-  UINT pw=mipW.back(),ph=mipH.back(),nw=std::max(1u,pw/2),nh=std::max(1u,ph/2);const auto&prev=mipData.back();std::vector<uint8_t>next((size_t)nw*nh*4);
-  for(UINT y=0;y<nh;y++)for(UINT x=0;x<nw;x++)for(UINT c=0;c<4;c++){
-   unsigned sum=0,count=0;for(UINT oy=0;oy<2;oy++)for(UINT ox=0;ox<2;ox++){UINT sx=std::min(pw-1,2*x+ox),sy=std::min(ph-1,2*y+oy);sum+=prev[((size_t)sy*pw+sx)*4+c];count++;}
-   next[((size_t)y*nw+x)*4+c]=(uint8_t)((sum+count/2)/count);
-  }
-  mipW.push_back(nw);mipH.push_back(nh);mipData.push_back(std::move(next));
- }
- const UINT mipCount=(UINT)mipData.size();
- D3D12_RESOURCE_DESC td{};td.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;td.Width=tw;td.Height=th;td.DepthOrArraySize=1;td.MipLevels=(UINT16)mipCount;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;td.SampleDesc.Count=1;
- auto hp=Heap(D3D12_HEAP_TYPE_DEFAULT);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&td,D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&m_texture)))){SetError("Moon texture allocation failed");return false;}
- std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> fp(mipCount);std::vector<UINT> rows(mipCount);std::vector<UINT64> rowBytes(mipCount);UINT64 total=0;
- m_device->GetCopyableFootprints(&td,0,mipCount,0,fp.data(),rows.data(),rowBytes.data(),&total);
- auto uph=Heap(D3D12_HEAP_TYPE_UPLOAD);auto bd=BufferDesc(total);ComPtr<ID3D12Resource>up;if(FAILED(m_device->CreateCommittedResource(&uph,D3D12_HEAP_FLAG_NONE,&bd,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&up)))){SetError("Moon upload allocation failed");return false;}
- uint8_t*map=nullptr;up->Map(0,nullptr,(void**)&map);for(UINT m=0;m<mipCount;m++)for(UINT y=0;y<mipH[m];y++)memcpy(map+fp[m].Offset+(size_t)y*fp[m].Footprint.RowPitch,mipData[m].data()+(size_t)y*mipW[m]*4,(size_t)mipW[m]*4);up->Unmap(0,nullptr);
- m_alloc[m_frame]->Reset();m_cmd->Reset(m_alloc[m_frame].Get(),nullptr);for(UINT m=0;m<mipCount;m++){D3D12_TEXTURE_COPY_LOCATION dst{m_texture.Get(),D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX};dst.SubresourceIndex=m;D3D12_TEXTURE_COPY_LOCATION sr{up.Get(),D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT};sr.PlacedFootprint=fp[m];m_cmd->CopyTextureRegion(&dst,0,0,0,&sr,nullptr);}
- D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=m_texture.Get();b.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_DEST;b.Transition.StateAfter=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;m_cmd->ResourceBarrier(1,&b);m_cmd->Close();ID3D12CommandList*l[]={m_cmd.Get()};m_queue->ExecuteCommandLists(1,l);WaitForGPU();
- D3D12_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=td.Format;sv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;sv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;sv.Texture2D.MipLevels=mipCount;m_device->CreateShaderResourceView(m_texture.Get(),&sv,m_srvHeap->GetCPUDescriptorHandleForHeapStart());
- std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<"Texture source "<<sw<<"x"<<sh<<", upload "<<tw<<"x"<<th<<", mip levels "<<mipCount<<", 16x anisotropic filtering\n";return true;}
+ D3D12_GRAPHICS_PIPELINE_STATE_DESC d{};d.pRootSignature=m_sceneRoot.Get();d.VS={vs->GetBufferPointer(),vs->GetBufferSize()};d.PS={ps->GetBufferPointer(),ps->GetBufferSize()};d.InputLayout={il,3};d.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;d.RTVFormats[0]=DXGI_FORMAT_R8G8B8A8_UNORM;d.NumRenderTargets=1;d.DSVFormat=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.SampleMask=UINT_MAX;d.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;d.RasterizerState.CullMode=D3D12_CULL_MODE_BACK;d.RasterizerState.FrontCounterClockwise=TRUE;d.RasterizerState.DepthClipEnable=TRUE;d.BlendState.RenderTarget[0].RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;d.DepthStencilState.DepthEnable=TRUE;d.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;d.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_LESS;return SUCCEEDED(m_device->CreateGraphicsPipelineState(&d,IID_PPV_ARGS(&m_scenePSO))); }
 
 bool Renderer::CreateDepth(){D3D12_RESOURCE_DESC d{};d.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;d.Width=m_width;d.Height=m_height;d.DepthOrArraySize=1;d.MipLevels=1;d.Format=DXGI_FORMAT_D32_FLOAT;d.SampleDesc.Count=1;d.Flags=D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;D3D12_CLEAR_VALUE cv{};cv.Format=d.Format;cv.DepthStencil.Depth=1;auto hp=Heap(D3D12_HEAP_TYPE_DEFAULT);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_DEPTH_WRITE,&cv,IID_PPV_ARGS(&m_depth))))return false;m_device->CreateDepthStencilView(m_depth.Get(),nullptr,m_dsvHeap->GetCPUDescriptorHandleForHeapStart());return true;}
-bool Renderer::CreateConstantBuffer(){auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto d=BufferDesc(256);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_cb))))return false;m_cb->Map(0,nullptr,(void**)&m_cbPtr);return true;}
+bool Renderer::CreateConstantBuffer(){auto hp=Heap(D3D12_HEAP_TYPE_UPLOAD);auto d=BufferDesc(256*FrameCount);if(FAILED(m_device->CreateCommittedResource(&hp,D3D12_HEAP_FLAG_NONE,&d,D3D12_RESOURCE_STATE_GENERIC_READ,nullptr,IID_PPV_ARGS(&m_cb))))return false;m_cb->Map(0,nullptr,(void**)&m_cbPtr);return true;}
 
 // Load the tracked TrueType asset into a private DirectWrite collection. Users do
 // not need to install OrbitX Header, and the app never changes Windows font state.
@@ -203,6 +190,8 @@ bool Renderer::InitVectorText(){
  m_d2dContext->SetTextRenderingParams(m_textRenderingParams.Get());
  m_d2dContext->SetDpi(96.0f,96.0f);
  if(FAILED(m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(0.88f,0.92f,0.88f,1.0f),&m_textBrush)))return false;
+ if(FAILED(m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.25f,1.f,.65f,.9f),&m_graphLine)) ||
+    FAILED(m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.8f,.9f,.85f,.28f),&m_graphGrid)))return false;
 
  if(!CreateHudBackBufferTargets())return false;
  // Diagnostic proof that no hidden DPI virtualization is in the render path.
@@ -230,7 +219,7 @@ bool Renderer::CreateHudBackBufferTargets(){
  return true;
 }
 
-bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateSphere()||!CreateDepth()||!CreateConstantBuffer())return false;if(!LoadTextureWIC(m_moonTexturePath))return false;if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
+bool Renderer::InitAssets(){if(!CreateScenePipeline()||!CreateDepth()||!CreateConstantBuffer()||!InitPlanetStreaming())return false;for(int col=0;col<2;col++)if(!LoadPlanetTile({4,0,col})){SetError("Cannot load required level 04 DDS roots from "+std::filesystem::path(m_surfaceRoot).string());return false;}if(!InitVectorText())return false;return LoadMenuBackground() && LoadMenuLogo() && LoadScenarioPreview();}
 
 bool Renderer::LoadMenuBackground(){
  ComPtr<IWICImagingFactory> f; HRESULT hr=CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f));
@@ -260,70 +249,87 @@ bool Renderer::LoadMenuLogo(){
  return true;
 }
 
-// A lightweight terrain thumbnail derived from the already-shipped lunar map.
-// Resize before uploading to Direct2D; do not decode a second full-resolution GPU texture.
+// Optional menu artwork; the scenario no longer decodes a global lunar map.
 bool Renderer::LoadScenarioPreview(){
  ComPtr<IWICImagingFactory> f;
  if(FAILED(CoCreateInstance(CLSID_WICImagingFactory,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(&f))))return false;
  ComPtr<IWICBitmapDecoder> d;
  const auto artwork=m_root+L"\\Textures\\Menu\\MoonViewPreview.jpg";
- m_scenarioPreviewArtwork=SUCCEEDED(f->CreateDecoderFromFilename(
-     artwork.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d));
- if(!m_scenarioPreviewArtwork){
-   const auto& map=m_moonTexturePath;
-   if(FAILED(f->CreateDecoderFromFilename(map.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d)))return false;
- }
- ComPtr<IWICBitmapFrameDecode> fr;
- if(FAILED(d->GetFrame(0,&fr)))return false;
- ComPtr<IWICBitmapSource> source=fr;
- ComPtr<IWICBitmapScaler> scaler;
- if(!m_scenarioPreviewArtwork){
-   if(FAILED(f->CreateBitmapScaler(&scaler)))return false;
-   if(FAILED(scaler->Initialize(fr.Get(),1024,512,WICBitmapInterpolationModeFant)))return false;
-   source=scaler;
- }
- ComPtr<IWICFormatConverter> cv;
- if(FAILED(f->CreateFormatConverter(&cv)))return false;
- if(FAILED(cv->Initialize(source.Get(),GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return false;
+ m_scenarioPreviewArtwork=SUCCEEDED(f->CreateDecoderFromFilename(artwork.c_str(),nullptr,GENERIC_READ,WICDecodeMetadataCacheOnLoad,&d));
+ if(!m_scenarioPreviewArtwork)return true;
+ ComPtr<IWICBitmapFrameDecode> fr;if(FAILED(d->GetFrame(0,&fr)))return false;
+ ComPtr<IWICFormatConverter> cv;if(FAILED(f->CreateFormatConverter(&cv)))return false;
+ if(FAILED(cv->Initialize(fr.Get(),GUID_WICPixelFormat32bppPBGRA,WICBitmapDitherTypeNone,nullptr,0,WICBitmapPaletteTypeCustom)))return false;
  return SUCCEEDED(m_d2dContext->CreateBitmapFromWicBitmap(cv.Get(),nullptr,&m_scenarioPreview));
 }
 
 void Renderer::UpdateCB(){
- // Faithful port of Orbiter Camera::SetRelPos() target-relative camera geometry.
- // Orbiter stores two unrestricted angles, normalizes each to 2*pi, constructs
- // the complete relative rotation matrix from them, then derives camera position
- // from that matrix.  Critically, camera up comes from the same rotation matrix;
- // it is NOT reconstructed from a fixed world-up vector.  This is what allows
- // continuous pole crossings without a LookAt/world-up discontinuity.
+ // Body geometry, camera, and lighting all use right-handed coordinates.
  XMMATRIX model=XMMatrixScaling(1737.4f,1737.4f,1737.4f);
- const float sinph=sinf(m_yaw),   cosph=cosf(m_yaw);
- const float sinth=sinf(m_pitch), costh=cosf(m_pitch);
-
- // Orbiter rrot (Camera.cpp::SetRelPos):
- // [ cosph,  sinph*sinth, -sinph*costh ]
- // [ 0,      costh,        sinth       ]
- // [ sinph, -cosph*sinth,  cosph*costh ]
- // rpos = third column * (-distance).
- XMVECTOR cam=XMVectorSet(
-     m_distanceKm*sinph*costh,
-    -m_distanceKm*sinth,
-    -m_distanceKm*cosph*costh,1.0f);
- XMVECTOR up=XMVectorSet(sinph*sinth,costh,-cosph*sinth,0.0f);
+ auto camera=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm);
+ auto p=camera.position,u=camera.up;
+ XMVECTOR cam=XMVectorSet(float(p.x),float(p.y),float(p.z),1);
+ XMVECTOR up=XMVectorSet(float(u.x),float(u.y),float(u.z),0);
  XMMATRIX view=XMMatrixLookAtRH(cam,XMVectorZero(),up);
- XMMATRIX proj=XMMatrixPerspectiveFovRH(XMConvertToRadians(m_fov),float(m_width)/m_height,1.0f,1000000.0f);
- auto moon=m_state.moonSSB();auto sd=m_state.sunSSB-moon;double n=sqrt(sd.x*sd.x+sd.y*sd.y+sd.z*sd.z);SceneCB c{};XMStoreFloat4x4(&c.mvp,XMMatrixTranspose(model*view*proj));XMStoreFloat4x4(&c.model,XMMatrixTranspose(model));c.sunDir={(float)(sd.x/n),(float)(sd.y/n),(float)(sd.z/n),0};memcpy(m_cbPtr,&c,sizeof(c));}
+ XMMATRIX proj=XMMatrixPerspectiveFovRH(XMConvertToRadians(m_fov),float(m_width)/m_height,std::clamp((m_distanceKm-1737.4f)*.1f,.00001f,1.f),1000000.0f);
+ auto moon=m_state.moonSSB();auto sd=m_state.sunSSB-moon;double n=sqrt(sd.x*sd.x+sd.y*sd.y+sd.z*sd.z);SceneCB c{};XMStoreFloat4x4(&c.mvp,XMMatrixTranspose(model*view*proj));XMStoreFloat4x4(&c.model,XMMatrixTranspose(model));c.sunDir={(float)(sd.x/n),(float)(sd.y/n),(float)(sd.z/n),0};memcpy(m_cbPtr+256*m_frame,&c,sizeof(c));}
+
+void Renderer::DrawCachedHudText(const std::wstring& text,float x,float y,bool right,float maxWidth){
+ if(m_hudTextIndex>=m_hudText.size())return;
+ auto& cached=m_hudText[m_hudTextIndex++];
+ float width=right?x:float(m_width)-x,height=float(m_height)-y;
+ if(maxWidth>0)width=std::min(width,maxWidth);
+ if(!cached.layout||cached.text!=text||cached.width!=width||cached.height!=height||cached.right!=right){
+   cached.layout.Reset();cached.text=text;cached.width=width;cached.height=height;cached.right=right;
+   if(FAILED(m_dwriteFactory->CreateTextLayout(text.c_str(),static_cast<UINT32>(text.size()),right?m_textRight.Get():m_textLeft.Get(),width,height,&cached.layout)))return;
+ }
+ m_d2dContext->DrawTextLayout(D2D1::Point2F(right?x-width:x,y),cached.layout.Get(),m_textBrush.Get());
+}
+void Renderer::DrawFrameRateGraph(){
+ // Transparent overlay matching the lower-center region in the reference screenshot.
+ float left=m_width*.20f,right=m_width*.81f,top=m_height*.865f,bottom=m_height*.97f;
+ float ceiling=100;
+ for(size_t i=0;i<m_frameHistory.Count();++i)ceiling=std::max(ceiling,float(m_frameHistory.At(i).fps));
+ ceiling=std::ceil(ceiling*1.1f/100.f)*100.f;
+ for(int i=0;i<=4;i++){
+   float y=bottom-(bottom-top)*i/4.f;
+   m_d2dContext->DrawLine(D2D1::Point2F(left,y),D2D1::Point2F(right,y),m_graphGrid.Get(),.7f);
+ }
+ m_d2dContext->DrawLine(D2D1::Point2F(left,top),D2D1::Point2F(left,bottom),m_graphGrid.Get());
+ double sampleTime=m_frameHistory.Count()?m_frameHistory.At(m_frameHistory.Count()-1).time:0;
+ if(m_graphSampleTime!=sampleTime||m_graphWidth!=m_width||m_graphHeight!=m_height||m_graphCeiling!=ceiling){
+   m_graphSampleTime=sampleTime;m_graphWidth=m_width;m_graphHeight=m_height;m_graphCeiling=ceiling;
+   m_graphGeometry.Reset();
+   auto point=[&](const Core::FrameRateHistory::Sample& sample){
+     float age=float((sampleTime-sample.time)/Core::FrameRateHistory::WindowSeconds);
+     return D2D1::Point2F(right-std::clamp(age,0.f,1.f)*(right-left),bottom-float(sample.fps)/ceiling*(bottom-top));
+   };
+   if(m_frameHistory.Count()>1 && SUCCEEDED(m_d2dFactory->CreatePathGeometry(&m_graphGeometry))){
+     ComPtr<ID2D1GeometrySink> sink;
+     if(SUCCEEDED(m_graphGeometry->Open(&sink))){
+       sink->BeginFigure(point(m_frameHistory.At(0)),D2D1_FIGURE_BEGIN_HOLLOW);
+       for(size_t i=1;i<m_frameHistory.Count();++i)sink->AddLine(point(m_frameHistory.At(i)));
+       sink->EndFigure(D2D1_FIGURE_END_OPEN);if(FAILED(sink->Close()))m_graphGeometry.Reset();
+     }else m_graphGeometry.Reset();
+   }
+ }
+ if(m_graphGeometry)m_d2dContext->DrawGeometry(m_graphGeometry.Get(),m_graphLine.Get(),1.5f);
+ DrawCachedHudText(L"FPS  |  12 SEC  |  CTRL+F",left,top-26,false);
+ wchar_t label[64];swprintf_s(label,L"0 \u2013 %.0f FPS",ceiling);DrawCachedHudText(label,right,top-26,true);
+}
 
 void Renderer::DrawHudText(){
  ID3D11Resource* wrapped[]={m_wrappedBack[m_frame].Get()};
  m_d3d11On12->AcquireWrappedResources(wrapped,1);
  m_d2dContext->SetTarget(m_d2dTarget[m_frame].Get());
  m_d2dContext->BeginDraw();
+ m_hudTextIndex=0;
 
  auto drawFmt=[&](const std::wstring& text,float x,float y,IDWriteTextFormat* fmt,ID2D1Brush* brush,bool right=false){
    D2D1_RECT_F rc=right?D2D1::RectF(0,y,x,(float)m_height):D2D1::RectF(x,y,(float)m_width,(float)m_height);
    m_d2dContext->DrawTextW(text.c_str(),(UINT32)text.size(),fmt,rc,brush,D2D1_DRAW_TEXT_OPTIONS_NONE,DWRITE_MEASURING_MODE_NATURAL);
  };
- auto draw=[&](const std::wstring&t,float x,float y,bool right){drawFmt(t,x,y,right?m_textRight.Get():m_textLeft.Get(),m_textBrush.Get(),right);};
+ auto draw=[&](const std::wstring&t,float x,float y,bool right){DrawCachedHudText(t,x,y,right);};
 
  if(m_appState!=AppState::Simulation){
    // Artwork is intentionally UI-free.  Downsample the 8K plate with high quality filtering.
@@ -572,13 +578,40 @@ void Renderer::DrawHudText(){
        };
        drawDisplayOption(subLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
        drawDisplayOption(subLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
-       drawFmt(L"Changes apply immediately and are saved on exit.",subLayout.title.left,subLayout.graphicsWindowed.bottom+30,m_textLeft.Get(),white.Get());
+       drawFmt(L"VSYNC",subLayout.title.left,subLayout.graphicsVsyncOff.top-65,m_textLeft.Get(),white.Get());
+       drawDisplayOption(subLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
+       drawDisplayOption(subLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
+       drawFmt(L"OFF: no application frame-rate cap.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+25,m_textLeft.Get(),white.Get());
+       drawFmt(L"Settings are saved automatically.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+60,m_textLeft.Get(),white.Get());
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
  }else{
-   constexpr float left=12,rightPad=12,line=22,top=8;draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);wchar_t buf[96];swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+3*line,false);swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+4*line,false);draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
+   if(m_tileOverlayMode>1)DrawPlanetLabels();
+   if(m_tileOverlayMode==3)DrawPlanetCoordinateLabels();
+   constexpr float left=12,rightPad=12,line=22,top=8;
+   draw(L"ORBITX 0.25",left,top,false);draw(L"VIEW EXTERNAL",left,top+line,false);draw(L"FRAME ICRF",left,top+2*line,false);
+   const auto position=Core::PlanetCamera::Orbit(m_yaw,m_pitch,m_distanceKm).position;
+   double latitude=std::atan2(position.z,std::hypot(position.x,position.y))*180/Core::PlanetPi;
+   double longitude=std::atan2(position.y,position.x)*180/Core::PlanetPi;
+   // Avoid displaying -0.00 when a coordinate rounds to zero.
+   if(std::abs(latitude)<.005)latitude=0;
+   if(std::abs(longitude)<.005)longitude=0;
+   wchar_t buf[96];
+   swprintf_s(buf,L"LAT %.2f\u00B0",latitude);draw(buf,left,top+3*line,false);
+   swprintf_s(buf,L"LON %.2f\u00B0",longitude);draw(buf,left,top+4*line,false);
+   swprintf_s(buf,L"ALT %.1F KM",double(m_distanceKm)-1737.4);draw(buf,left,top+5*line,false);
+   swprintf_s(buf,L"DIST %.1F KM",m_distanceKm);draw(buf,left,top+6*line,false);
+   swprintf_s(buf,L"FOV %.1F DEG",m_fov);draw(buf,left,top+7*line,false);
+   draw(L"2000 JAN 01 12:00:00 TDB",(float)m_width-rightPad,top,true);draw(L"TIME 1X",(float)m_width-rightPad,top+line,true);
+   swprintf_s(buf,L"FPS %.1f",m_fps);draw(buf,(float)m_width-rightPad,top+2*line,true);
+   if(m_showFrameGraph)DrawFrameRateGraph();
+#ifdef PLANET_DEBUG_MODE
+   DrawPlanetTelemetry((float)m_width-rightPad,top+4*line);
+#endif
+   if(m_scriptPanelOpen)DrawScriptPanel();
  }
+
  HRESULT hr=m_d2dContext->EndDraw();
  m_d2dContext->SetTarget(nullptr);
  m_d3d11On12->ReleaseWrappedResources(wrapped,1);
@@ -586,23 +619,91 @@ void Renderer::DrawHudText(){
  if(FAILED(hr)&&hr!=D2DERR_RECREATE_TARGET)SetError("Direct2D EndDraw: "+HrText(hr));
 }
 
-void Renderer::Update(float){UpdateCB();}
+void Renderer::Update(float){} // Scene constants are written once in Render().
 void Renderer::Render(){
+ if((m_traceSession&&!m_trace.Active())||(m_regressionSession&&!m_regressionLog.Active()))StopLivestream("LOG_IO_FAILURE");
+ ++m_traceFrame;
+ if(m_trace.Active())m_trace.SetFrame(m_traceFrame);
+ if(m_scriptOperation==ScriptOperation::Recording&&
+    (m_cameraScript.width!=m_width||m_cameraScript.height!=m_height))StopLivestream("VIEWPORT_CHANGED");
+ if(m_scriptOperation==ScriptOperation::Playing)UpdateScriptPlayback();
+ if(m_trace.Active())TraceCamera("CAMERA_STATE");
+ const auto now=std::chrono::steady_clock::now();
+ if(m_appState==AppState::Simulation && m_lastFrameStart.time_since_epoch().count())m_frameHistory.AddFrame(std::chrono::duration<double>(now-m_lastFrameStart).count());
+ if(m_appState!=AppState::Simulation){m_frameHistory.Clear();m_graphGeometry.Reset();m_graphSampleTime=-1;}
+ m_lastFrameStart=now;
+ const double elapsed=std::chrono::duration<double>(now-m_fpsStart).count();
+ if(elapsed>=0.5){m_fps=m_fpsFrames/elapsed;m_fpsFrames=0;m_fpsStart=now;}
+ ++m_fpsFrames;
+ if(m_appState==AppState::Simulation && !UpdatePlanet()){if(m_scriptOperation!=ScriptOperation::Idle)StopLivestream("RENDER_FAILURE");return;}
+ UpdateCB();
+ if(m_scriptOperation==ScriptOperation::Playing)CaptureRegression();
+ else if(m_scriptOperation==ScriptOperation::Recording)CaptureRecordingRegression();
+ if(m_trace.Active()){
+   TraceFrameSnapshot();
+   SceneCB scene{};memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));
+   std::array<float,35> matrixState{};size_t index=0;
+   for(const auto& row:scene.mvp.m)for(float value:row)matrixState[index++]=value;
+   for(const auto& row:scene.model.m)for(float value:row)matrixState[index++]=value;
+   matrixState[index++]=scene.sunDir.x;matrixState[index++]=scene.sunDir.y;matrixState[index++]=scene.sunDir.z;
+   if(m_traceMatrixStates.Update(0,matrixState))m_trace.Log([&](auto& out){out<<"SCENE_MATRIX mvp=";for(const auto& row:scene.mvp.m)for(float value:row)out<<value<<",";
+     out<<" model=";for(const auto& row:scene.model.m)for(float value:row)out<<value<<",";
+     out<<" sun_dir="<<scene.sunDir.x<<","<<scene.sunDir.y<<","<<scene.sunDir.z;});
+ }
  m_alloc[m_frame]->Reset();m_cmd->Reset(m_alloc[m_frame].Get(),m_scenePSO.Get());
  D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition.pResource=m_back[m_frame].Get();b.Transition.StateBefore=D3D12_RESOURCE_STATE_PRESENT;b.Transition.StateAfter=D3D12_RESOURCE_STATE_RENDER_TARGET;b.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;m_cmd->ResourceBarrier(1,&b);
  auto r=m_rtvHeap->GetCPUDescriptorHandleForHeapStart();r.ptr+=m_frame*m_rtvStride;auto ds=m_dsvHeap->GetCPUDescriptorHandleForHeapStart();float clear[]={0,0,0,1};m_cmd->ClearRenderTargetView(r,clear,0,nullptr);m_cmd->ClearDepthStencilView(ds,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);m_cmd->OMSetRenderTargets(1,&r,FALSE,&ds);
- D3D12_VIEWPORT vp{0,0,(float)m_width,(float)m_height,0,1};D3D12_RECT sc{0,0,(LONG)m_width,(LONG)m_height};m_cmd->RSSetViewports(1,&vp);m_cmd->RSSetScissorRects(1,&sc);m_cmd->SetGraphicsRootSignature(m_sceneRoot.Get());ID3D12DescriptorHeap*h[]={m_srvHeap.Get()};m_cmd->SetDescriptorHeaps(1,h);m_cmd->SetGraphicsRootConstantBufferView(0,m_cb->GetGPUVirtualAddress());m_cmd->SetGraphicsRootDescriptorTable(1,m_srvHeap->GetGPUDescriptorHandleForHeapStart());m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);m_cmd->IASetVertexBuffers(0,1,&m_vbv);m_cmd->IASetIndexBuffer(&m_ibv);m_cmd->DrawIndexedInstanced(m_indexCount,1,0,0,0);
+ D3D12_VIEWPORT vp{0,0,(float)m_width,(float)m_height,0,1};D3D12_RECT sc{0,0,(LONG)m_width,(LONG)m_height};m_cmd->RSSetViewports(1,&vp);m_cmd->RSSetScissorRects(1,&sc);m_cmd->SetGraphicsRootSignature(m_sceneRoot.Get());ID3D12DescriptorHeap*h[]={m_srvHeap.Get()};m_cmd->SetDescriptorHeaps(1,h);m_cmd->SetGraphicsRootConstantBufferView(0,m_cb->GetGPUVirtualAddress()+256*m_frame);
+ m_cmd->EndQuery(m_timestampHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_frame*2);
+ if(m_appState==AppState::Simulation) DrawPlanet();
+ m_cmd->EndQuery(m_timestampHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_frame*2+1);
+ m_cmd->ResolveQueryData(m_timestampHeap.Get(),D3D12_QUERY_TYPE_TIMESTAMP,m_frame*2,2,m_timestampReadback.Get(),m_frame*2*sizeof(UINT64));
+ m_hasTimestamp[m_frame]=true;
  // Leave the back buffer in RENDER_TARGET. D3D11On12/Direct2D draws the vector HUD
  // and ReleaseWrappedResources performs the final RENDER_TARGET -> PRESENT transition.
  m_cmd->Close();ID3D12CommandList*l[]={m_cmd.Get()};m_queue->ExecuteCommandLists(1,l);
- DrawHudText();
- m_swap->Present(1,0);MoveToNextFrame();
+ m_sceneCpuMs=m_sceneCpuMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-now).count()*.1;
+ auto hudStart=std::chrono::steady_clock::now();DrawHudText();
+ m_hudCpuMs=m_hudCpuMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-hudStart).count()*.1;
+ auto presentStart=std::chrono::steady_clock::now();
+ HRESULT presented=m_swap->Present(m_vsync?1:0,(!m_vsync&&m_tearingSupported)?DXGI_PRESENT_ALLOW_TEARING:0);
+ if(FAILED(presented)){SetError("Present: "+HrText(presented));if(m_scriptOperation!=ScriptOperation::Idle)StopLivestream("RENDER_FAILURE");return;}
+ MoveToNextFrame();
+ if(m_scriptOperation==ScriptOperation::Playing)CompleteScriptFrame();
+ else if(m_scriptOperation==ScriptOperation::Recording)RecordScriptFrame();
+ m_presentMs=m_presentMs*.9+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presentStart).count()*.1;
+ m_trace.Log([&](auto& out){out<<"FRAME_END scene_cpu_ms="<<m_sceneCpuMs<<" hud_cpu_ms="<<m_hudCpuMs
+   <<" scene_gpu_ms="<<m_sceneGpuMs<<" present_wait_ms="<<m_presentMs<<" fps="<<m_fps;});
 }
-void Renderer::WaitForGPU(){UINT64 v=++m_fenceValue[m_frame];m_queue->Signal(m_fence.Get(),v);if(m_fence->GetCompletedValue()<v){m_fence->SetEventOnCompletion(v,m_fenceEvent);WaitForSingleObject(m_fenceEvent,5000);}}
-void Renderer::MoveToNextFrame(){UINT64 v=++m_fenceValue[m_frame];m_queue->Signal(m_fence.Get(),v);m_frame=m_swap->GetCurrentBackBufferIndex();if(m_fence->GetCompletedValue()<m_fenceValue[m_frame]){m_fence->SetEventOnCompletion(m_fenceValue[m_frame],m_fenceEvent);WaitForSingleObject(m_fenceEvent,5000);}m_fenceValue[m_frame]=v;}
-void Renderer::Shutdown(){if(m_queue)WaitForGPU();if(m_cb)m_cb->Unmap(0,nullptr);if(m_fenceEvent)CloseHandle(m_fenceEvent);m_fenceEvent=nullptr;}
+void Renderer::WaitForGPU(){
+ UINT64 value=++m_nextFenceValue;
+ m_queue->Signal(m_fence.Get(),value);
+ if(m_fence->GetCompletedValue()<value){m_fence->SetEventOnCompletion(value,m_fenceEvent);WaitForSingleObject(m_fenceEvent,INFINITE);}
+}
+void Renderer::MoveToNextFrame(){
+ m_fenceValue[m_frame]=++m_nextFenceValue;m_queue->Signal(m_fence.Get(),m_nextFenceValue);
+ m_frame=m_swap->GetCurrentBackBufferIndex();
+ if(m_fence->GetCompletedValue()<m_fenceValue[m_frame]){m_fence->SetEventOnCompletion(m_fenceValue[m_frame],m_fenceEvent);WaitForSingleObject(m_fenceEvent,INFINITE);}
+ if(m_hasTimestamp[m_frame]){
+   UINT64* timestamps=nullptr;
+   D3D12_RANGE read{m_frame*2*sizeof(UINT64),(m_frame*2+2)*sizeof(UINT64)};
+   if(SUCCEEDED(m_timestampReadback->Map(0,&read,reinterpret_cast<void**>(&timestamps)))){
+     UINT index=m_frame*2;if(timestamps[index+1]>=timestamps[index])m_sceneGpuMs=m_sceneGpuMs*.9+double(timestamps[index+1]-timestamps[index])*1000.0/double(m_timestampFrequency)*.1;
+     D3D12_RANGE written{0,0};m_timestampReadback->Unmap(0,&written);
+   }
+ }
+}
+void Renderer::Shutdown(){
+ m_tileLoader.Stop();
+ StopLivestream("APPLICATION_SHUTDOWN");
+ if(m_uploadQueue&&m_uploadFence){auto value=++m_uploadFenceValue;m_uploadQueue->Signal(m_uploadFence.Get(),value);m_uploadFence->SetEventOnCompletion(value,m_fenceEvent);WaitForSingleObject(m_fenceEvent,INFINITE);}
+ if(m_queue)WaitForGPU();
+ for(auto& batch:m_uploadBatches)if(batch.arena)batch.arena->Unmap(0,nullptr);
+ if(m_cb)m_cb->Unmap(0,nullptr);if(m_fenceEvent)CloseHandle(m_fenceEvent);m_fenceEvent=nullptr;
+}
 void Renderer::Resize(UINT width,UINT height){
  if(!m_swap||width==0||height==0||(width==m_width&&height==m_height))return;
+ m_trace.Log([&](auto& out){out<<"RESIZE width="<<width<<" height="<<height;});
 
  // ResizeBuffers requires every direct and indirect reference to the old swap-chain
  // buffers to be gone. With D3D11On12/D2D the destruction order matters.
@@ -629,7 +730,7 @@ void Renderer::Resize(UINT width,UINT height){
  for(UINT i=0;i<FrameCount;i++)m_back[i].Reset();
  m_depth.Reset();
 
- HRESULT hr=m_swap->ResizeBuffers(FrameCount,width,height,DXGI_FORMAT_R8G8B8A8_UNORM,0);
+ HRESULT hr=m_swap->ResizeBuffers(FrameCount,width,height,DXGI_FORMAT_R8G8B8A8_UNORM,m_tearingSupported?DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING:0);
  if(FAILED(hr)){
   SetError("ResizeBuffers: "+HrText(hr));
   return;
@@ -648,10 +749,17 @@ void Renderer::Resize(UINT width,UINT height){
  if(log)log<<"Resize: client="<<m_width<<"x"<<m_height<<" swapchain="<<m_width<<"x"<<m_height<<" aspect="<<(double(m_width)/double(m_height))<<"\n";
 }
 void Renderer::OnKeyDown(WPARAM k){
+ m_trace.Log([&](auto& out){out<<"INPUT_KEY key="<<k<<" ctrl="<<bool(GetKeyState(VK_CONTROL)&0x8000);});
+ if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
+   if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;m_scriptNameFocused=false;if(m_scriptPanelOpen&&m_scriptOperation==ScriptOperation::Idle)RefreshScripts();TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
+   if(k=='F'&&!(m_scriptOperation!=ScriptOperation::Idle&&m_scriptLogging==ScriptLogging::Benchmark)){m_showFrameGraph=!m_showFrameGraph;TraceCamera("GRAPH_TOGGLE");return;}
+   if(k=='O'&&!(m_scriptOperation!=ScriptOperation::Idle&&m_scriptLogging==ScriptLogging::Benchmark)){m_tileOverlayMode=Core::NextTileOverlayMode(m_tileOverlayMode);m_telemetryText.clear();TraceCamera("OVERLAY_TOGGLE");return;}
+   if(k=='L'&&m_scriptOperation!=ScriptOperation::Playing){m_planet.frozen=!m_planet.frozen;TraceCamera("LOD_FREEZE_TOGGLE");return;}
+ }
  if(k==VK_ESCAPE){
    // In simulation, Escape exits the active scenario back to the OrbitX main menu.
    // In menus/submenus, navigation is intentionally handled only by the on-screen BACK control.
-   if(m_appState==AppState::Simulation){ OnMouseUp(); m_appState=AppState::MainMenu; m_hoverSelection=-1; }
+   if(m_appState==AppState::Simulation){ OnMouseUp();StopLivestream("SCENARIO_EXIT"); m_appState=AppState::MainMenu; m_hoverSelection=-1; }
    return;
  }
  if(m_appState==AppState::Simulation)return;
@@ -659,7 +767,11 @@ void Renderer::OnKeyDown(WPARAM k){
  // A scenario is launched only with the explicit LAUNCH control, never by selecting it.
 }
 void Renderer::OnLeftClick(int x,int y){
- if(m_appState==AppState::Simulation)return;
+ m_trace.Log([&](auto& out){out<<"INPUT_LEFT_CLICK x="<<x<<" y="<<y;});
+ if(m_appState==AppState::Simulation){
+   if(m_scriptPanelOpen)ScriptPanelClick(float(x),float(y));
+   return;
+ }
  if(m_appState==AppState::MainMenu){
    const auto layout=OrbitX::UI::BuildMainMenuLayout((float)m_width,(float)m_height);
    const int hit=OrbitX::UI::HitTestMainMenu(layout,(float)x,(float)y);
@@ -677,12 +789,20 @@ void Renderer::OnLeftClick(int x,int y){
  if(m_appState==AppState::Graphics){
    if(OrbitX::UI::HitTestButton(layout.graphicsWindowed,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(false);
    else if(OrbitX::UI::HitTestButton(layout.graphicsFullscreen,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(true);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOff,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(false);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOn,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(true);
  }
 }
 
 
+void Renderer::SetVSync(bool enabled){
+ m_vsync=enabled;
+ m_trace.Log([&](auto& out){out<<"VSYNC enabled="<<enabled;});
+ if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
+}
 void Renderer::SetFullscreen(bool enabled){
  if(enabled==m_fullscreen)return;
+ m_trace.Log([&](auto& out){out<<"FULLSCREEN enabled="<<enabled;});
  if(enabled){
    m_windowedStyle=(DWORD)GetWindowLongPtr(m_hwnd,GWL_STYLE);m_windowedPlacement.length=sizeof(WINDOWPLACEMENT);GetWindowPlacement(m_hwnd,&m_windowedPlacement);
    MONITORINFO mi{sizeof(mi)};GetMonitorInfo(MonitorFromWindow(m_hwnd,MONITOR_DEFAULTTONEAREST),&mi);
@@ -692,17 +812,24 @@ void Renderer::SetFullscreen(bool enabled){
  }else{
    SetWindowLongPtr(m_hwnd,GWL_STYLE,m_windowedStyle);SetWindowPlacement(m_hwnd,&m_windowedPlacement);SetWindowPos(m_hwnd,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);m_fullscreen=false;
  }
+ if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
 }
 void Renderer::OnMouseDown(int,int){
- if(m_appState!=AppState::Simulation||m_drag)return;
+ if(m_appState!=AppState::Simulation||m_drag||m_scriptPanelOpen||m_scriptOperation==ScriptOperation::Playing)return;
+ m_trace.Log([&](auto& out){out<<"INPUT_DRAG_BEGIN";});
  m_drag=true;SetCapture(m_hwnd);ShowCursor(FALSE);
  GetCursorPos(&m_dragAnchorScreen);
 }
 void Renderer::OnMouseUp(){
  if(!m_drag)return;
+ m_trace.Log([&](auto& out){out<<"INPUT_DRAG_END";});
  m_drag=false;if(GetCapture()==m_hwnd)ReleaseCapture();ShowCursor(TRUE);
 }
 void Renderer::OnMouseMove(int x,int y){
+ m_trace.Log([&](auto& out){out<<"INPUT_MOUSE_MOVE x="<<x<<" y="<<y<<" dragging="<<m_drag;});
+ if(m_appState==AppState::Simulation&&m_scriptPanelOpen){
+   m_scriptHover=Core::ScriptPanelLayout::Build(float(m_width),float(m_height)).action.Contains(float(x),float(y))?0:-1;return;
+ }
  if(m_appState==AppState::MainMenu&&!m_drag){
    const auto layout=OrbitX::UI::BuildMainMenuLayout((float)m_width,(float)m_height);
    m_mouseNavigation=true;
@@ -719,6 +846,8 @@ void Renderer::OnMouseMove(int x,int y){
    if(m_appState==AppState::Graphics){
      if(hit(layout.graphicsWindowed))m_graphicsHover=0;
      else if(hit(layout.graphicsFullscreen))m_graphicsHover=1;
+     else if(hit(layout.graphicsVsyncOff))m_graphicsHover=2;
+     else if(hit(layout.graphicsVsyncOn))m_graphicsHover=3;
    }
    if(m_appState==AppState::ScenarioSelect){
      if(hit(layout.solarSystem))m_scenarioHover=0;
@@ -741,8 +870,25 @@ void Renderer::OnMouseMove(int x,int y){
  m_yaw=fmodf(m_yaw,twoPi);if(m_yaw<0.0f)m_yaw+=twoPi;
  m_pitch=fmodf(m_pitch,twoPi);if(m_pitch<0.0f)m_pitch+=twoPi;
  SetCursorPos(m_dragAnchorScreen.x,m_dragAnchorScreen.y);
+ TraceCamera("CAMERA_DRAG");
 }
 void Renderer::OnMouseLeave(){if(m_appState!=AppState::Simulation&&!m_drag){m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;}}
 
-void Renderer::OnMouseWheel(short d){if(m_appState!=AppState::Simulation)return;m_distanceKm=std::clamp(m_distanceKm*(d>0?.90f:1.10f),1800.0f,500000.0f);}
+void Renderer::OnMouseWheel(short d){
+ if(m_appState==AppState::Simulation&&m_scriptPanelOpen){
+   if(!m_recordTab&&m_scriptOperation==ScriptOperation::Idle&&!m_savedScripts.empty()){
+     if(d>0&&m_selectedScript>0)--m_selectedScript;
+     if(d<0&&m_selectedScript+1<m_savedScripts.size())++m_selectedScript;
+     if(m_selectedScript<m_scriptListOffset)m_scriptListOffset=m_selectedScript;
+     if(m_selectedScript>=m_scriptListOffset+5)m_scriptListOffset=m_selectedScript-4;
+   }
+   return;
+ }
+ if(m_appState!=AppState::Simulation || m_scriptOperation==ScriptOperation::Playing || (GetKeyState(VK_CONTROL)&0x8000))return;
+ m_trace.Log([&](auto& out){out<<"INPUT_WHEEL delta="<<d;});
+ m_distanceKm=float(Core::PlanetWheelDistance(m_distanceKm,1737.4,d));
+ // Round Orbiter's surface floor upward when storing in float, never beneath the double-precision sphere.
+ if(m_distanceKm<1737.4)m_distanceKm=std::nextafter(1737.4f,2000.f);
+ TraceCamera("CAMERA_WHEEL");
+}
 }
