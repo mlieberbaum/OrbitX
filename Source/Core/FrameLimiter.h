@@ -1,6 +1,7 @@
 #pragma once
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 namespace OrbitX::Core {
@@ -30,18 +31,29 @@ inline bool ParseFrameLimit(std::wstring_view text,unsigned& value){
     if(parsed<FrameLimit::MinFPS)return false;
     value=parsed;return true;
 }
-// Frame starts are spaced without spinning or catching up after a slow frame.
-// A mode/rate change starts a fresh schedule, including entry/exit from benchmarks.
+// Keep intended deadlines, rather than adding a full interval to each late wake.
+// Small lateness is recovered by shorter later sleeps. A full interval of debt
+// is discarded, so loading stalls never create an unbounded catch-up backlog.
 class FramePacer {
 public:
-    int64_t Delay(int64_t nowNs,unsigned fps)const {
-        if(!fps||!m_started||fps!=m_fps)return 0;
-        const int64_t remaining=m_startNs+(1000000000LL+fps-1)/fps-nowNs;
-        return remaining>0?remaining:0;
+    void Reset(){m_started=false;m_fps=0;m_lastNs=0;m_nextNs=0;}
+    int64_t Delay(int64_t nowNs,unsigned fps){
+        if(fps<FrameLimit::MinFPS||fps>FrameLimit::MaxFPS||nowNs<0){Reset();return 0;}
+        if(fps!=m_fps||nowNs<m_lastNs)m_started=false;
+        m_fps=fps;m_lastNs=nowNs;
+        return m_started&&nowNs<m_nextNs?m_nextNs-nowNs:0;
     }
-    void Begin(int64_t nowNs,unsigned fps){m_startNs=nowNs;m_fps=fps;m_started=true;}
+    // Call exactly once when admitting a frame, after Delay returned zero.
+    void Begin(int64_t nowNs,unsigned fps){
+        Delay(nowNs,fps);
+        if(!m_fps)return;
+        const int64_t interval=(1000000000LL+fps-1)/fps;
+        const int64_t origin=m_started&&nowNs>=m_nextNs&&nowNs-m_nextNs<interval?m_nextNs:nowNs;
+        if(origin>std::numeric_limits<int64_t>::max()-interval){Reset();return;}
+        m_nextNs=origin+interval;m_started=true;
+    }
 private:
-    int64_t m_startNs=0;
+    int64_t m_nextNs=0,m_lastNs=0;
     unsigned m_fps=0;
     bool m_started=false;
 };

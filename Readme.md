@@ -331,9 +331,26 @@ Uncapped disables the field and keeps its value for later use.
 The mode and value are saved on normal exit in Runtime/Config/UserPreferences.cfg
 as FrameRateLimit=Capped/Uncapped and MaxFPS=<integer>, alongside display mode,
 VSync and any unrelated preferences. Existing display/VSync saves also preserve
-these fields. A high-resolution waitable timer sleeps between frame starts;
-Windows input wakes the wait so low caps do not block menu interaction. Slow
-frames do not trigger catch-up bursts. Uncapped frames do not wait on the timer.
+these fields. The graphics submenu uses three stacked glass cards on the left, with matching
+radio capsules for display mode, VSync and the cap. The existing heading, BACK
+control and background artwork are preserved. The disabled FPS field retains its
+value; no scrollbar is needed yet.
+
+A high-resolution one-shot waitable timer sleeps until a monotonic frame-start
+deadline. Deadlines advance by the selected interval, including rendering time.
+Small late wakes shorten later waits instead of accumulating drift; lateness of
+at least one whole interval resets the schedule to now, with the following frame
+due one interval later. There is no spin, measured-FPS feedback or backlog loop.
+When rendering is slower than the cap, no limiter sleep is added. Uncapped frames
+bypass waiting. Cap/rate changes, benchmark transitions, minimize/restore, power
+events and forced resize redraws start a fresh schedule.
+
+Windows input interrupts waits, and bounded message batches keep rendering from
+being starved. Timer waits have finite timeouts. Timer creation/arming/wait failure
+uses a blocking fallback, reports once to the debugger, and avoids retrying a
+failed handle. A final short Sleep prevents a hot loop if message waiting fails.
+Minimized windows block between message checks. Actual elapsed time still drives
+simulation and scripts; forced modal-resize redraws remain immediate.
 
 Benchmark recording and playback bypass the application cap for their entire
 active session, including loading, then automatically resume the saved cap on
@@ -343,8 +360,15 @@ benchmark measurements. Regression and performance file formats are unchanged;
 Full session headers include the frame-cap settings. Tile selection, streaming,
 cache policy, shaders and draw submission are unchanged.
 
-FrameLimiterTests.cpp covers pacing, rate changes, stalls, benchmark bypass,
+FrameLimiterTests.cpp covers 1.5 million modeled frame steps, late-wake accuracy,
+capacity transitions, clock/arithmetic edges, rate changes, stalls, benchmark bypass,
 preference persistence/defaults/malformed values and scaled control hit-testing.
+FrameWaiterTests.cpp fault-injects the actual Windows wait wrapper using an
+explicit test-only include path, including timer/input/timeout wakes, creation,
+arming and wait failures, finite timeout conversions and final blocking fallback:
+`g++ -std=c++20 -I Source/Tests/Win32Mock Source/Tests/FrameWaiterTests.cpp -o wait-tests`.
+The mock is not included in any Visual Studio game configuration.
+
 Rebuild Env_Test_Release in Visual Studio, select Capped / 120 and verify FPS;
 run a Benchmark script and confirm uncapped FPS and restoration after finish/stop.
 Exit/relaunch to confirm persistence, test Uncapped's disabled field, and compare
@@ -372,5 +396,7 @@ path. Camera/LOD, cache capacity, dependency/eviction protections, upload budget
 shaders and patch submission remain unchanged. Use the same view, cap and VSync
 for thermal comparisons, allowing temperatures to settle. Start with a 120 FPS
 cap for normal viewing; use the monitor's refresh rate as another useful target.
-An FPS cap is a ceiling, not a guaranteed rate. OS timer/wakeup overhead can make
-very high caps undershoot, particularly at sub-millisecond frame intervals.
+The cap targets an average rate; individual intervals may be shorter while
+recovering small wake-up delays. OS scheduling can still make very high caps
+undershoot, particularly at sub-millisecond intervals. Hardware measurements,
+rather than the arithmetic model, establish attainable accuracy and waiting CPU.

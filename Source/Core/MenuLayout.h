@@ -48,13 +48,17 @@ struct SubmenuLayout {
     RectF description{860,338,1392,950};
     RectF preview{892,422,1360,592};
     RectF launch{1440,865,1800,948};
-    RectF graphicsWindowed{72,542,286,607};
-    RectF graphicsFullscreen{304,542,550,607};
-    RectF graphicsVsyncOff{72,732,286,797};
-    RectF graphicsVsyncOn{304,732,550,797};
-    RectF graphicsCapped{860,542,1070,607};
-    RectF graphicsUncapped{1090,542,1340,607};
-    RectF graphicsCapInput{860,680,1100,745};
+    // One left-hand rail; shared geometry keeps drawing and hit-testing aligned.
+    RectF graphicsDisplayPanel{52,452,756,595};
+    RectF graphicsVsyncPanel{52,613,756,756};
+    RectF graphicsLimitPanel{52,774,756,1020};
+    RectF graphicsWindowed{82,510,390,574};
+    RectF graphicsFullscreen{418,510,726,574};
+    RectF graphicsVsyncOff{82,671,390,735};
+    RectF graphicsVsyncOn{418,671,726,735};
+    RectF graphicsCapped{82,832,390,896};
+    RectF graphicsUncapped{418,832,726,896};
+    RectF graphicsCapInput{82,914,302,974};
 };
 
 inline float ScaleFor(float width,float height){return std::min(width/kDesignWidth,height/kDesignHeight);}

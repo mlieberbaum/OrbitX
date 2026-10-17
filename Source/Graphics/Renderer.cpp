@@ -562,48 +562,64 @@ void Renderer::DrawHudText(){
          drawMenuButton(launch,L"LAUNCH",m_scenarioHover==2);
        }
      }else if(m_appState==AppState::Graphics){
-       // Keep the display controls below the enlarged, underlined GRAPHICS heading.
-       drawFmt(L"DISPLAY MODE",subLayout.title.left,subLayout.graphicsWindowed.top-65,m_textLeft.Get(),white.Get());
-       auto drawDisplayOption=[&](const OrbitX::UI::RectF& rect,const wchar_t* label,bool selected,bool hovered){
-         auto shape=makeButton(rect,0.0f);
-         m_d2dContext->FillGeometry(shape.Get(),selected||hovered?greenFill.Get():glass.Get());
-         if(hovered){
-           // Use the same layered neon glow as the main-menu hover treatment.
-           m_d2dContext->DrawGeometry(shape.Get(),greenGlow.Get(),12.0f);
-           m_d2dContext->DrawGeometry(shape.Get(),greenGlow2.Get(),5.0f);
-           m_d2dContext->DrawGeometry(shape.Get(),green.Get(),1.6f);
-         }else{
-           m_d2dContext->DrawGeometry(shape.Get(),selected?green.Get():muted.Get(),1.5f);
+       // Floating smoked-glass cards, all on the left. Keep the existing heading,
+       // BACK control and artwork untouched; no full-height backing slab.
+       Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> quiet;
+       m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.56f,.66f,.61f,.85f),&quiet);
+       auto card=[&](const OrbitX::UI::RectF& r,const wchar_t* label){
+         Microsoft::WRL::ComPtr<ID2D1PathGeometry> shape;
+         Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+         if(FAILED(m_d2dFactory->CreatePathGeometry(&shape))||FAILED(shape->Open(&sink)))return;
+         constexpr float cut=16.0f;
+         sink->BeginFigure(D2D1::Point2F(r.left+cut,r.top),D2D1_FIGURE_BEGIN_FILLED);
+         sink->AddLine(D2D1::Point2F(r.right-cut,r.top));sink->AddLine(D2D1::Point2F(r.right,r.top+cut));
+         sink->AddLine(D2D1::Point2F(r.right,r.bottom-cut));sink->AddLine(D2D1::Point2F(r.right-cut,r.bottom));
+         sink->AddLine(D2D1::Point2F(r.left+cut,r.bottom));sink->AddLine(D2D1::Point2F(r.left,r.bottom-cut));
+         sink->AddLine(D2D1::Point2F(r.left,r.top+cut));sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+         if(FAILED(sink->Close()))return;
+         if(glassGradient){glassGradient->SetStartPoint(D2D1::Point2F(0,r.top));glassGradient->SetEndPoint(D2D1::Point2F(0,r.bottom));}
+         m_d2dContext->FillGeometry(shape.Get(),glassGradient?static_cast<ID2D1Brush*>(glassGradient.Get()):glass.Get());
+         m_d2dContext->DrawGeometry(shape.Get(),greenGlow.Get(),5.0f);
+         m_d2dContext->DrawGeometry(shape.Get(),green.Get(),1.0f);
+         tracked(label,r.left+30,r.top+18,m_textScenarioButton.Get(),white.Get(),3.0f);
+       };
+       card(subLayout.graphicsDisplayPanel,L"DISPLAY MODE");
+       card(subLayout.graphicsVsyncPanel,L"VSYNC");
+       card(subLayout.graphicsLimitPanel,L"FRAME RATE LIMIT");
+       auto option=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool selected,bool hovered){
+         const auto shape=D2D1::RoundedRect(D2D1::RectF(r.left,r.top,r.right,r.bottom),10,10);
+         auto* gradient=selected?hotGradient.Get():glassGradient.Get();
+         if(gradient){gradient->SetStartPoint(D2D1::Point2F(0,r.top));gradient->SetEndPoint(D2D1::Point2F(0,r.bottom));}
+         m_d2dContext->FillRoundedRectangle(shape,gradient?static_cast<ID2D1Brush*>(gradient):glass.Get());
+         if(selected||hovered){
+           m_d2dContext->DrawRoundedRectangle(shape,greenGlow.Get(),10.0f);
+           m_d2dContext->DrawRoundedRectangle(shape,greenGlow2.Get(),4.0f);
          }
-         centeredButtonText(label,rect,rect.left+24,m_textLeft.Get(),
-                            selected||hovered?green.Get():white.Get(),0.8f);
+         m_d2dContext->DrawRoundedRectangle(shape,selected||hovered?green.Get():quiet.Get(),1.5f);
+         const auto center=D2D1::Point2F(r.left+40,(r.top+r.bottom)*.5f);
+         const auto ring=D2D1::Ellipse(center,14,14);
+         if(selected)m_d2dContext->DrawEllipse(ring,greenGlow2.Get(),8.0f);
+         m_d2dContext->DrawEllipse(ring,selected?green.Get():quiet.Get(),1.8f);
+         if(selected)m_d2dContext->FillEllipse(D2D1::Ellipse(center,8,8),green.Get());
+         centeredButtonText(label,r,r.left+84,m_textScenarioButton.Get(),white.Get(),2.2f);
        };
-       drawDisplayOption(subLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
-       drawDisplayOption(subLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
-       drawFmt(L"VSYNC",subLayout.title.left,subLayout.graphicsVsyncOff.top-65,m_textLeft.Get(),white.Get());
-       drawDisplayOption(subLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
-       drawDisplayOption(subLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
-       drawFmt(L"VSync follows the monitor refresh rate.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+25,m_textLeft.Get(),white.Get());
-       drawFmt(L"Settings are saved automatically.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+60,m_textLeft.Get(),white.Get());
-       drawFmt(L"FRAME RATE LIMIT",subLayout.graphicsCapped.left,subLayout.graphicsCapped.top-65,m_textLeft.Get(),white.Get());
-       auto radio=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool selected,bool hovered){
-         const auto center=D2D1::Point2F(r.left+14,(r.top+r.bottom)*.5f);
-         auto* brush=selected||hovered?green.Get():white.Get();
-         m_d2dContext->DrawEllipse(D2D1::Ellipse(center,10,10),brush,1.5f);
-         if(selected)m_d2dContext->FillEllipse(D2D1::Ellipse(center,5,5),green.Get());
-         centeredButtonText(label,r,r.left+38,m_textLeft.Get(),brush,.8f);
-       };
-       radio(subLayout.graphicsCapped,L"CAPPED",m_frameLimit.enabled,m_graphicsHover==4);
-       radio(subLayout.graphicsUncapped,L"UNCAPPED",!m_frameLimit.enabled,m_graphicsHover==5);
+       option(subLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
+       option(subLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
+       option(subLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
+       option(subLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
+       option(subLayout.graphicsCapped,L"CAPPED",m_frameLimit.enabled,m_graphicsHover==4);
+       option(subLayout.graphicsUncapped,L"UNCAPPED",!m_frameLimit.enabled,m_graphicsHover==5);
        const auto& input=subLayout.graphicsCapInput;
-       auto* inputBrush=m_frameLimit.enabled?green.Get():muted.Get();
-       drawFmt(L"FPS (1 - 10000)",input.left,input.top-48,m_textLeft.Get(),m_frameLimit.enabled?white.Get():muted.Get());
-       m_d2dContext->FillRectangle(D2D1::RectF(input.left,input.top,input.right,input.bottom),glass.Get());
-       m_d2dContext->DrawRectangle(D2D1::RectF(input.left,input.top,input.right,input.bottom),inputBrush,m_frameCapFocused?2.0f:1.0f);
+       auto* inputBrush=m_frameLimit.enabled?white.Get():quiet.Get();
+       const auto inputShape=D2D1::RoundedRect(D2D1::RectF(input.left,input.top,input.right,input.bottom),9,9);
+       m_d2dContext->FillRoundedRectangle(inputShape,glass.Get());
+       if(m_frameLimit.enabled&&(m_frameCapFocused||m_graphicsHover==6))m_d2dContext->DrawRoundedRectangle(inputShape,greenGlow2.Get(),5.0f);
+       m_d2dContext->DrawRoundedRectangle(inputShape,m_frameLimit.enabled?quiet.Get():muted.Get(),m_frameCapFocused?2.0f:1.0f);
        if(m_frameCapFocused&&m_frameCapReplace)m_d2dContext->FillRectangle(D2D1::RectF(input.left+10,input.top+8,input.right-10,input.bottom-8),greenFill.Get());
        auto value=m_frameCapText+(m_frameCapFocused?L"_":L"");
-       centeredButtonText(value.c_str(),input,input.left+20,m_textLeft.Get(),inputBrush,0);
-       drawFmt(L"Benchmark mode temporarily bypasses this limit.",input.left,input.bottom+30,m_textLeft.Get(),white.Get());
+       centeredButtonText(value.c_str(),input,input.left+24,m_textMenu.Get(),inputBrush,1.0f);
+       centeredButtonText(L"FPS",input,input.right+28,m_textScenarioButton.Get(),inputBrush,2.2f);
+       drawFmt(L"Benchmark runs uncapped",input.left,input.bottom+14,m_textLeft.Get(),quiet.Get());
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -814,10 +830,10 @@ void Renderer::OnLeftClick(int x,int y){
    return;
  }
  if(m_appState==AppState::Graphics){
-   if(OrbitX::UI::HitTestButton(layout.graphicsWindowed,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(false);
-   else if(OrbitX::UI::HitTestButton(layout.graphicsFullscreen,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(true);
-   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOff,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(false);
-   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOn,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(true);
+   if(OrbitX::UI::HitTestButton(layout.graphicsWindowed,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(false);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsFullscreen,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(true);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOff,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(false);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOn,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(true);
    else if(OrbitX::UI::HitTestButton(layout.graphicsCapped,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFrameLimit(true,m_frameLimit.fps);
    else if(OrbitX::UI::HitTestButton(layout.graphicsUncapped,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFrameLimit(false,m_frameLimit.fps);
    else if(m_frameLimit.enabled&&OrbitX::UI::HitTestButton(layout.graphicsCapInput,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_frameCapFocused=true;m_frameCapReplace=true;}
@@ -903,13 +919,14 @@ void Renderer::OnMouseMove(int x,int y){
    m_scenarioHover=-1;
    m_graphicsHover=-1;
    if(m_appState==AppState::Graphics){
-     if(hit(layout.graphicsWindowed))m_graphicsHover=0;
-     else if(hit(layout.graphicsFullscreen))m_graphicsHover=1;
-     else if(hit(layout.graphicsVsyncOff))m_graphicsHover=2;
-     else if(hit(layout.graphicsVsyncOn))m_graphicsHover=3;
-     else if(hit(layout.graphicsCapped))m_graphicsHover=4;
-     else if(hit(layout.graphicsUncapped))m_graphicsHover=5;
-     else if(m_frameLimit.enabled&&hit(layout.graphicsCapInput))m_graphicsHover=6;
+     const auto graphicsHit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
+     if(graphicsHit(layout.graphicsWindowed))m_graphicsHover=0;
+     else if(graphicsHit(layout.graphicsFullscreen))m_graphicsHover=1;
+     else if(graphicsHit(layout.graphicsVsyncOff))m_graphicsHover=2;
+     else if(graphicsHit(layout.graphicsVsyncOn))m_graphicsHover=3;
+     else if(graphicsHit(layout.graphicsCapped))m_graphicsHover=4;
+     else if(graphicsHit(layout.graphicsUncapped))m_graphicsHover=5;
+     else if(m_frameLimit.enabled&&graphicsHit(layout.graphicsCapInput))m_graphicsHover=6;
    }
    if(m_appState==AppState::ScenarioSelect){
      if(hit(layout.solarSystem))m_scenarioHover=0;
