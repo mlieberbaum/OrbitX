@@ -156,7 +156,7 @@ private:
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> m_graphGeometry;
     double m_graphSampleTime=-1;UINT m_graphWidth=0,m_graphHeight=0;float m_graphCeiling=0;
     Core::FrameRateHistory m_frameHistory;
-    bool m_showFrameGraph=true;
+    bool m_showFrameGraph=false;
     std::chrono::steady_clock::time_point m_lastFrameStart{};
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);

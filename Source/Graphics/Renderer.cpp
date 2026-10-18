@@ -649,7 +649,6 @@ void Renderer::DrawHudText(){
        auto value=m_frameCapText+(m_frameCapFocused?L"_":L"");
        centeredButtonText(value.c_str(),input,input.left+24,m_textMenu.Get(),inputBrush,1.0f);
        centeredButtonText(L"FPS",input,input.right+28,m_textScenarioButton.Get(),inputBrush,2.2f);
-       drawFmt(L"Benchmark runs uncapped",input.left,input.bottom+14,m_textLeft.Get(),quiet.Get());
        m_d2dContext->SetTransform(uiTransform);
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
