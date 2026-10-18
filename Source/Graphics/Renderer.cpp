@@ -564,7 +564,16 @@ void Renderer::DrawHudText(){
      }else if(m_appState==AppState::Graphics){
        // Floating smoked-glass cards, all on the left. Keep the existing heading,
        // BACK control and artwork untouched; no full-height backing slab.
-       Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> quiet;
+       // Draw the canonical geometry at two-thirds size. BuildSubmenuLayout
+       // applies this identical transform to the clickable rectangles.
+       const OrbitX::UI::SubmenuLayout graphicsLayout{};
+       constexpr float compact=OrbitX::UI::kGraphicsControlScale;
+       const D2D1_MATRIX_3X2_F graphicsTransform{scale*compact,0,0,scale*compact,
+           ox+scale*OrbitX::UI::kGraphicsControlLeft*(1-compact),
+           oy+scale*OrbitX::UI::kGraphicsControlTop*(1-compact)};
+       m_d2dContext->SetTransform(graphicsTransform);
+       Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> quiet,cardBackground;
+       m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.045f,.045f,.045f,.88f),&cardBackground);
        m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.56f,.66f,.61f,.85f),&quiet);
        auto card=[&](const OrbitX::UI::RectF& r,const wchar_t* label){
          Microsoft::WRL::ComPtr<ID2D1PathGeometry> shape;
@@ -577,15 +586,36 @@ void Renderer::DrawHudText(){
          sink->AddLine(D2D1::Point2F(r.left+cut,r.bottom));sink->AddLine(D2D1::Point2F(r.left,r.bottom-cut));
          sink->AddLine(D2D1::Point2F(r.left,r.top+cut));sink->EndFigure(D2D1_FIGURE_END_CLOSED);
          if(FAILED(sink->Close()))return;
-         if(glassGradient){glassGradient->SetStartPoint(D2D1::Point2F(0,r.top));glassGradient->SetEndPoint(D2D1::Point2F(0,r.bottom));}
-         m_d2dContext->FillGeometry(shape.Get(),glassGradient?static_cast<ID2D1Brush*>(glassGradient.Get()):glass.Get());
+         m_d2dContext->FillGeometry(shape.Get(),cardBackground.Get());
          m_d2dContext->DrawGeometry(shape.Get(),greenGlow.Get(),5.0f);
          m_d2dContext->DrawGeometry(shape.Get(),green.Get(),1.0f);
          tracked(label,r.left+30,r.top+18,m_textScenarioButton.Get(),white.Get(),3.0f);
        };
-       card(subLayout.graphicsDisplayPanel,L"DISPLAY MODE");
-       card(subLayout.graphicsVsyncPanel,L"VSYNC");
-       card(subLayout.graphicsLimitPanel,L"FRAME RATE LIMIT");
+       card(graphicsLayout.graphicsDisplayPanel,L"DISPLAY MODE");
+       card(graphicsLayout.graphicsVsyncPanel,L"VSYNC");
+       card(graphicsLayout.graphicsLimitPanel,L"FRAME RATE LIMIT");
+       // The bundled header face is unusually wide. Fit each option into the
+       // space after its radio circle instead of allowing text to overrun it.
+       auto optionLabel=[&](const OrbitX::UI::RectF& r,const wchar_t* label){
+         Microsoft::WRL::ComPtr<IDWriteTextLayout> text;
+         const UINT32 length=static_cast<UINT32>(wcslen(label));
+         if(FAILED(m_dwriteFactory->CreateTextLayout(label,length,m_textScenarioButton.Get(),1000,120,&text)))return;
+         const DWRITE_TEXT_RANGE range{0,length};
+         text->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+         text->SetFontSize(16.0f,range);
+         Microsoft::WRL::ComPtr<IDWriteTextLayout1> spaced;
+         if(SUCCEEDED(text.As(&spaced)))spaced->SetCharacterSpacing(0,1.4f,0,range);
+         DWRITE_TEXT_METRICS metrics{};
+         if(FAILED(text->GetMetrics(&metrics)))return;
+         const float available=r.Width()-84.0f-18.0f;
+         if(metrics.widthIncludingTrailingWhitespace>available){
+           const float fit=available/metrics.widthIncludingTrailingWhitespace;
+           text->SetFontSize(16.0f*fit,range);
+           if(spaced)spaced->SetCharacterSpacing(0,1.4f*fit,0,range);
+           if(FAILED(text->GetMetrics(&metrics)))return;
+         }
+         m_d2dContext->DrawTextLayout(D2D1::Point2F(r.left+84,r.top+(r.Height()-metrics.height)*.5f-metrics.top),text.Get(),white.Get());
+       };
        auto option=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool selected,bool hovered){
          const auto shape=D2D1::RoundedRect(D2D1::RectF(r.left,r.top,r.right,r.bottom),10,10);
          auto* gradient=selected?hotGradient.Get():glassGradient.Get();
@@ -601,15 +631,15 @@ void Renderer::DrawHudText(){
          if(selected)m_d2dContext->DrawEllipse(ring,greenGlow2.Get(),8.0f);
          m_d2dContext->DrawEllipse(ring,selected?green.Get():quiet.Get(),1.8f);
          if(selected)m_d2dContext->FillEllipse(D2D1::Ellipse(center,8,8),green.Get());
-         centeredButtonText(label,r,r.left+84,m_textScenarioButton.Get(),white.Get(),2.2f);
+         optionLabel(r,label);
        };
-       option(subLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
-       option(subLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
-       option(subLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
-       option(subLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
-       option(subLayout.graphicsCapped,L"CAPPED",m_frameLimit.enabled,m_graphicsHover==4);
-       option(subLayout.graphicsUncapped,L"UNCAPPED",!m_frameLimit.enabled,m_graphicsHover==5);
-       const auto& input=subLayout.graphicsCapInput;
+       option(graphicsLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
+       option(graphicsLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
+       option(graphicsLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
+       option(graphicsLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
+       option(graphicsLayout.graphicsCapped,L"CAPPED",m_frameLimit.enabled,m_graphicsHover==4);
+       option(graphicsLayout.graphicsUncapped,L"UNCAPPED",!m_frameLimit.enabled,m_graphicsHover==5);
+       const auto& input=graphicsLayout.graphicsCapInput;
        auto* inputBrush=m_frameLimit.enabled?white.Get():quiet.Get();
        const auto inputShape=D2D1::RoundedRect(D2D1::RectF(input.left,input.top,input.right,input.bottom),9,9);
        m_d2dContext->FillRoundedRectangle(inputShape,glass.Get());
@@ -620,6 +650,7 @@ void Renderer::DrawHudText(){
        centeredButtonText(value.c_str(),input,input.left+24,m_textMenu.Get(),inputBrush,1.0f);
        centeredButtonText(L"FPS",input,input.right+28,m_textScenarioButton.Get(),inputBrush,2.2f);
        drawFmt(L"Benchmark runs uncapped",input.left,input.bottom+14,m_textLeft.Get(),quiet.Get());
+       m_d2dContext->SetTransform(uiTransform);
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());

@@ -7,6 +7,9 @@ namespace OrbitX::UI {
 constexpr float kDesignWidth  = 1920.0f;
 constexpr float kDesignHeight = 1080.0f;
 constexpr int   kMainMenuCount = 8;
+// Graphics cards scale about their top-left corner, leaving navigation unchanged.
+constexpr float kGraphicsControlScale=2.0f/3.0f;
+constexpr float kGraphicsControlLeft=52.0f,kGraphicsControlTop=452.0f;
 
 struct RectF {
     float left{}, top{}, right{}, bottom{};
@@ -76,6 +79,14 @@ inline SubmenuLayout BuildSubmenuLayout(float width,float height){
     SubmenuLayout out{}; out.scale=ScaleFor(width,height);out.offsetX=OffsetXFor(width,out.scale);out.offsetY=OffsetYFor(height,out.scale);
     // Keep every submenu BACK control identical in position and size to SCENARIOS.
     out.back=BuildMainMenuLayout(width,height).buttons[0];
+    for(RectF* r:{&out.graphicsDisplayPanel,&out.graphicsVsyncPanel,&out.graphicsLimitPanel,
+        &out.graphicsWindowed,&out.graphicsFullscreen,&out.graphicsVsyncOff,&out.graphicsVsyncOn,
+        &out.graphicsCapped,&out.graphicsUncapped,&out.graphicsCapInput}){
+        r->left=kGraphicsControlLeft+(r->left-kGraphicsControlLeft)*kGraphicsControlScale;
+        r->right=kGraphicsControlLeft+(r->right-kGraphicsControlLeft)*kGraphicsControlScale;
+        r->top=kGraphicsControlTop+(r->top-kGraphicsControlTop)*kGraphicsControlScale;
+        r->bottom=kGraphicsControlTop+(r->bottom-kGraphicsControlTop)*kGraphicsControlScale;
+    }
     return out;
 }
 inline void ScreenToDesign(float sx,float sy,float scale,float ox,float oy,float& x,float& y){x=(sx-ox)/scale;y=(sy-oy)/scale;}
