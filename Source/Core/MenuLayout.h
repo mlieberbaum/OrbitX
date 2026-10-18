@@ -54,7 +54,7 @@ struct SubmenuLayout {
     // One left-hand rail; shared geometry keeps drawing and hit-testing aligned.
     RectF graphicsDisplayPanel{52,452,756,595};
     RectF graphicsVsyncPanel{52,613,756,756};
-    RectF graphicsLimitPanel{52,774,756,1020};
+    RectF graphicsLimitPanel{52,774,756,995};
     RectF graphicsWindowed{82,510,390,574};
     RectF graphicsFullscreen{418,510,726,574};
     RectF graphicsVsyncOff{82,671,390,735};
