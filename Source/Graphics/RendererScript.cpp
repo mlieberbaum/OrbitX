@@ -99,6 +99,7 @@ void Renderer::RefreshScripts(){
     }catch(const std::exception& e){SetError(e.what());m_scriptStatus=L"Cannot read Runtime/Scripts";}
 }
 void Renderer::OnCharacter(wchar_t c){
+    if(FrameCapCharacter(c))return;
     if(m_appState!=AppState::Simulation||!m_scriptPanelOpen||!m_recordTab||!m_scriptNameFocused||m_scriptOperation!=ScriptOperation::Idle)return;
     if(c==L'\b'){if(!m_scriptName.empty())m_scriptName.pop_back();return;}
     if(c==L'\r'){m_scriptNameFocused=false;return;}
@@ -209,7 +210,7 @@ bool Renderer::ResetScriptCache(){
         const auto id=it->first;
         m_trace.Log([&](auto& out){out<<"TILE_EVICT tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" reason=SCRIPT_CACHE_RESET slot="<<it->second.slot<<" bytes="<<it->second.bytes
             <<" last_draw_fence="<<it->second.lastDrawFence<<" draw_fence_completed="<<m_fence->GetCompletedValue()<<" upload_fence="<<it->second.uploadFence;});
-        m_tileBytes-=it->second.bytes;m_descriptorSlots.Release(it->second.slot);it=m_tiles.erase(it);
+        m_tileBytes-=it->second.bytes;if(m_planetOptimizations)m_descriptorSlots.Release(it->second.slot);it=m_tiles.erase(it);
     }
     m_failedTiles.clear();m_tileDraws.clear();m_planet.leaves.clear();m_planet.requests.clear();m_planet.dependencies.clear();
     for(auto& batch:m_uploadBatches){batch.tiles.clear();batch.used=0;}
@@ -372,7 +373,7 @@ void Renderer::TraceFrameSnapshot(){
         for(auto [level,count]:levels)out<<level<<":"<<count<<",";});
 }
 void Renderer::StartLivestream(){
-    m_settledPlanetCache.Invalidate(); // Emit a fresh traversal state for this trace session.
+    m_settledPlanetCache.Invalidate();
     m_traceDrawIds.clear();m_traceRequestIds.clear();
     m_traceDrawStates.Clear();m_traceCameraStates.Clear();m_traceMatrixStates.Clear();
     m_trace.SetFrame(m_traceFrame);
@@ -384,6 +385,8 @@ void Renderer::StartLivestream(){
     m_scriptStatus=L"Log: "+m_trace.Path().filename().wstring();
     m_trace.Log([&](auto& out){out<<"SESSION scenario=Moon_View script=Manual_Exploration body=Moon radius_km=1737.4"
         <<" surface_root=\""<<Core::EnvironmentTrace::Escape(std::filesystem::path(m_surfaceRoot).string())<<"\""
+        <<" planet_optimizations="<<m_planetOptimizations
+        <<" frame_cap_enabled="<<m_frameLimit.enabled<<" frame_cap_fps="<<m_frameLimit.fps<<" effective_frame_cap_fps="<<EffectiveFrameLimit()
         <<" indexed_dds="<<m_planet.files.size()<<" rejected_dds="<<m_planet.rejectedFiles
 #ifdef _DEBUG
         <<" debug_build=1"

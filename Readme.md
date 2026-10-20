@@ -318,44 +318,87 @@ None playback uses the same snapshot/loading/hold sequence and restores the
 original camera, while preserving display settings. It activates no log writer,
 creates no log folder and records no continuous performance series.
 
-## Settled-view CPU and upload bookkeeping optimization
 
-A fully loaded, unchanged view reuses its selected leaves and draw records.
-The exact camera angles/distance/FOV, viewport, LOD-freeze state, resident tile
-count, indexed file count, upload submission fence and selected leaves must still
-match. Pending requests, deferred uploads and failed textures disable reuse.
-Only a frame with all cached textures ready can be remembered. LRU touches still
-advance every frame, and DrawPlanet still submits every patch and updates draw
-fences. Scene matrices, HUD, overlays and presentation continue normally.
-Camera/viewport/freeze/residency changes return to the original selection path.
-Script cache resets, camera restoration and new Full trace sessions explicitly
-invalidate reuse. Cached resource pointers are used only while their settled
-frame remains valid; mutation takes the original path before resources recycle.
+### Optional frame-rate limit
 
-Upload completion scans run only when the completed upload fence changes.
-Texture descriptors use an occupancy bitset instead of building a temporary
-set for each upload, preserving the exact lowest-free-slot rule. Failed GPU
-allocations do not consume a slot. Safe evictions and script resets release
-slots after the existing fence/dependency protections. The draw-pin set is built
-only when byte/slot pressure requires eviction. Cache capacity/budget, traversal,
-LOD thresholds, culling, loading priorities, 16-attempt/2-ms upload budgets,
-shader data and draw submission are unchanged. Moving/loading views still use
-the original selector; stationary views benefit most from reuse.
+Graphics now provides CAPPED / UNCAPPED radio controls and an FPS field
+(1–10000, remembered value initially 120). Uncapped is the default for existing
+preferences. Click the field to replace its value, type digits and press Enter
+or click elsewhere to apply; Ctrl+A selects all, Backspace edits, and Escape
+cancels. Invalid/empty/out-of-range input restores the previous valid value.
+Uncapped disables the field and keeps its value for later use.
 
-`PlanetPerformanceTests.cpp` checks all reuse keys/invalidation cases and
-compares 30,000 descriptor allocations/releases against the previous set rule,
-including full and partial descriptor-word boundaries. A portable GPU-stubbed
-adapter comparison of the actual old/new tile-update methods checked 4,670
-controlled frames across loading, camera/FOV/viewport changes, both poles,
-freeze/unfreeze, cache pressure, failure state, residency and LRU touches.
-Component timings exclude real GPU allocation, rendering, HUD and presentation;
-they are not end-to-end FPS estimates. Windows/DX12 performance remains a local
-measurement.
+The mode and value are saved on normal exit in Runtime/Config/UserPreferences.cfg
+as FrameRateLimit=Capped/Uncapped and MaxFPS=<integer>, alongside display mode,
+VSync and any unrelated preferences. Existing display/VSync saves also preserve
+these fields. The graphics submenu uses three stacked glass cards on the left, with matching
+radio capsules for display mode, VSync and the cap. The existing heading, BACK
+control and background artwork are preserved. The disabled FPS field retains its
+value; no scrollbar is needed yet.
 
-Keep the existing format-4 regression baseline: no log-format changes are made
-by this optimization. Rebuild Env_Test_Release, rerun Regression and compare
-against the baseline. Then rerun the same Benchmark scripts at the same viewport,
-with VSync off and without opening Ctrl+R or changing display settings during the
-run. Compare each script/view against itself; different script signatures are
-not before/after measurements. Remember that loading_us includes the required
-two-second stability confirmation and Windows' disk cache is uncontrolled.
+A high-resolution one-shot waitable timer sleeps until a monotonic frame-start
+deadline. Deadlines advance by the selected interval, including rendering time.
+Small late wakes shorten later waits instead of accumulating drift; lateness of
+at least one whole interval resets the schedule to now, with the following frame
+due one interval later. There is no spin, measured-FPS feedback or backlog loop.
+When rendering is slower than the cap, no limiter sleep is added. Uncapped frames
+bypass waiting. Cap/rate changes, minimize/restore, power
+events and forced resize redraws start a fresh schedule.
+
+Windows input interrupts waits, and bounded message batches keep rendering from
+being starved. Timer waits have finite timeouts. Timer creation/arming/wait failure
+uses a blocking fallback, reports once to the debugger, and avoids retrying a
+failed handle. A final short Sleep prevents a hot loop if message waiting fails.
+Minimized windows block between message checks. Actual elapsed time still drives
+simulation and scripts; forced modal-resize redraws remain immediate.
+
+All script modes, including Benchmark recording and playback, respect the user's
+selected frame cap. Scripts never enable or disable planet optimizations: that
+startup setting remains under manual control in OrbitX.cfg. For uncapped benchmark
+measurements, manually select Uncapped and turn VSync off before running the script.
+Regression and performance file formats are unchanged;
+Full session headers include the frame-cap settings. Tile selection, streaming,
+cache policy, shaders and draw submission are unchanged.
+
+FrameLimiterTests.cpp covers 1.5 million modeled frame steps, late-wake accuracy,
+capacity transitions, clock/arithmetic edges, rate changes, stalls, manual cap selection,
+preference persistence/defaults/malformed values and scaled control hit-testing.
+FrameWaiterTests.cpp fault-injects the actual Windows wait wrapper using an
+explicit test-only include path, including timer/input/timeout wakes, creation,
+arming and wait failures, finite timeout conversions and final blocking fallback:
+`g++ -std=c++20 -I Source/Tests/Win32Mock Source/Tests/FrameWaiterTests.cpp -o wait-tests`.
+The mock is not included in any Visual Studio game configuration.
+
+Rebuild Env_Test_Release in Visual Studio, select Capped / 120 and verify FPS;
+run a Benchmark script and confirm the selected cap remains effective, then
+manually select Uncapped and rerun. Both selections must remain unchanged after
+finish/stop.
+Exit/relaunch to confirm persistence, test Uncapped's disabled field, and compare
+Regression output to the existing baseline.
+
+
+### Experimental planet optimization preference
+
+Close OrbitX, edit Runtime/Config/OrbitX.cfg, then restart:
+
+    PlanetOptimizations=Off
+
+Off is the default and runs the original per-frame selection, upload-completion
+scan, descriptor set allocation and draw-pin bookkeeping from 2d2dad9. Set On
+to enable f423679's settled-view reuse, fence scan shortcut, descriptor occupancy
+bitset and pressure-only pin bookkeeping. This is a startup-only experimental
+switch, independent of the frame cap; Benchmark respects both settings and tests
+whichever implementation and cap you selected. Display/VSync/exit saves only update
+UserPreferences.cfg and never rewrite OrbitX.cfg. Obsolete PlanetOptimizations
+entries in user preferences are ignored and removed on the next preference save.
+Full session headers record it; regression/performance formats remain unchanged. Regression outputs should match in both modes.
+
+The previous three helper/test files are restored for the optional optimized
+path. Camera/LOD, cache capacity, dependency/eviction protections, upload budgets,
+shaders and patch submission remain unchanged. Use the same view, cap and VSync
+for thermal comparisons, allowing temperatures to settle. Start with a 120 FPS
+cap for normal viewing; use the monitor's refresh rate as another useful target.
+The cap targets an average rate; individual intervals may be shorter while
+recovering small wake-up delays. OS scheduling can still make very high caps
+undershoot, particularly at sub-millisecond intervals. Hardware measurements,
+rather than the arithmetic model, establish attainable accuracy and waiting CPU.

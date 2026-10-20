@@ -128,7 +128,11 @@ int main() {
     std::ofstream(prefsPath)<<"DisplayMode=Fullscreen\r\nVSync=Off\r\nOther=keep\r\n";
     assert(Core::SaveDisplayPreferences(prefsPath,{false,true}));prefs=Core::LoadDisplayPreferences(prefsPath);assert(!prefs.fullscreen&&prefs.vsync);
     std::ifstream prefsFile(prefsPath);std::string saved((std::istreambuf_iterator<char>(prefsFile)),{});assert(saved.find("Other=keep")!=std::string::npos);prefsFile.close();
-    auto menu=UI::BuildSubmenuLayout(1920,1080);assert(UI::HitTestButton(menu.graphicsVsyncOff,18,150,760,menu.scale,menu.offsetX,menu.offsetY));assert(!menu.graphicsFullscreen.Contains(150,760));
+    auto menu=UI::BuildSubmenuLayout(1920,1080);
+    const float vsyncX=(menu.graphicsVsyncOff.left+menu.graphicsVsyncOff.right)*.5f;
+    const float vsyncY=(menu.graphicsVsyncOff.top+menu.graphicsVsyncOff.bottom)*.5f;
+    assert(UI::HitTestButton(menu.graphicsVsyncOff,0,vsyncX,vsyncY,menu.scale,menu.offsetX,menu.offsetY));
+    assert(!menu.graphicsFullscreen.Contains(vsyncX,vsyncY));
     // Regression: keep traversal dependencies resident under polar cache pressure.
     {
     using namespace Core;

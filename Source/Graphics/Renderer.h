@@ -25,6 +25,7 @@
 #include "../Core/SnapshotRun.h"
 #include "../Core/ScriptSession.h"
 #include "../Core/TileOverlay.h"
+#include "../Core/FrameLimiter.h"
 #include "../Core/PlanetFrameCache.h"
 #include "../Core/DescriptorSlots.h"
 
@@ -49,7 +50,12 @@ public:
     bool IsFullscreen() const { return m_fullscreen; }
     void SetVSync(bool enabled);
     bool IsVSync() const { return m_vsync; }
+    void SetFrameLimit(bool enabled,unsigned fps);
+    unsigned EffectiveFrameLimit()const {return m_frameLimit.Effective();}
+    void SaveUserPreferences();
 private:
+    void CommitFrameCapInput(bool accept=true);
+    bool FrameCapCharacter(wchar_t character);
     static constexpr UINT FrameCount=2;
     struct Vertex { DirectX::XMFLOAT3 pos, normal; DirectX::XMFLOAT2 uv; };
     struct SceneCB { DirectX::XMFLOAT4X4 mvp; DirectX::XMFLOAT4X4 model; DirectX::XMFLOAT4 sunDir; };
@@ -150,7 +156,7 @@ private:
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> m_graphGeometry;
     double m_graphSampleTime=-1;UINT m_graphWidth=0,m_graphHeight=0;float m_graphCeiling=0;
     Core::FrameRateHistory m_frameHistory;
-    bool m_showFrameGraph=true;
+    bool m_showFrameGraph=false;
     std::chrono::steady_clock::time_point m_lastFrameStart{};
     void WaitForGPU(); void MoveToNextFrame(); void UpdateCB(); void DrawHudText();
     void SetError(const std::string& s);
@@ -196,8 +202,10 @@ private:
     std::map<Core::TileId,TileResource> m_tiles;
     std::set<Core::TileId> m_failedTiles;
     std::vector<TileDraw> m_tileDraws;
+    // Startup-only preference: changing implementation requires a restart.
+    bool m_planetOptimizations=false;
     Core::PlanetFrameCache m_settledPlanetCache;
-    std::vector<TileResource*> m_settledTouchedTiles; // Valid only while the settled cache is reusable.
+    std::vector<TileResource*> m_settledTouchedTiles;
     Core::DescriptorSlots<TileCapacity> m_descriptorSlots;
     std::set<Core::TileId> m_traceDrawIds,m_traceRequestIds;
     Core::TraceStateCache<Core::TileId,TileDraw> m_traceDrawStates;
@@ -245,9 +253,12 @@ private:
     bool m_solarSystemExpanded=false;
     bool m_scenarioSelected=false;
     int m_scenarioHover=-1; // 0: category, 1: Moon View, 2: Launch
-    int m_graphicsHover=-1; // 0: WINDOWED, 1: FULL SCREEN, 2: VSync off, 3: VSync on, -1: neither
+    int m_graphicsHover=-1; // Display/VSync: 0..3; cap controls: 4..6; -1: none
     bool m_mouseNavigation=false;
     bool m_vsync=false,m_tearingSupported=false;
+    Core::FrameLimit m_frameLimit;
+    bool m_frameCapFocused=false,m_frameCapReplace=false;
+    std::wstring m_frameCapText=std::to_wstring(Core::FrameLimit::DefaultFPS);
     bool m_fullscreen=false; WINDOWPLACEMENT m_windowedPlacement{sizeof(WINDOWPLACEMENT)}; DWORD m_windowedStyle=WS_OVERLAPPEDWINDOW;
     bool m_drag=false; POINT m_dragAnchorScreen{};
 };

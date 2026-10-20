@@ -7,6 +7,9 @@ namespace OrbitX::UI {
 constexpr float kDesignWidth  = 1920.0f;
 constexpr float kDesignHeight = 1080.0f;
 constexpr int   kMainMenuCount = 8;
+// Graphics cards scale about their top-left corner, leaving navigation unchanged.
+constexpr float kGraphicsControlScale=2.0f/3.0f;
+constexpr float kGraphicsControlLeft=52.0f,kGraphicsControlTop=452.0f;
 
 struct RectF {
     float left{}, top{}, right{}, bottom{};
@@ -48,10 +51,17 @@ struct SubmenuLayout {
     RectF description{860,338,1392,950};
     RectF preview{892,422,1360,592};
     RectF launch{1440,865,1800,948};
-    RectF graphicsWindowed{72,542,286,607};
-    RectF graphicsFullscreen{304,542,550,607};
-    RectF graphicsVsyncOff{72,732,286,797};
-    RectF graphicsVsyncOn{304,732,550,797};
+    // One left-hand rail; shared geometry keeps drawing and hit-testing aligned.
+    RectF graphicsDisplayPanel{52,452,756,595};
+    RectF graphicsVsyncPanel{52,613,756,756};
+    RectF graphicsLimitPanel{52,774,756,995};
+    RectF graphicsWindowed{82,510,390,574};
+    RectF graphicsFullscreen{418,510,726,574};
+    RectF graphicsVsyncOff{82,671,390,735};
+    RectF graphicsVsyncOn{418,671,726,735};
+    RectF graphicsCapped{82,832,390,896};
+    RectF graphicsUncapped{418,832,726,896};
+    RectF graphicsCapInput{82,914,302,974};
 };
 
 inline float ScaleFor(float width,float height){return std::min(width/kDesignWidth,height/kDesignHeight);}
@@ -69,6 +79,14 @@ inline SubmenuLayout BuildSubmenuLayout(float width,float height){
     SubmenuLayout out{}; out.scale=ScaleFor(width,height);out.offsetX=OffsetXFor(width,out.scale);out.offsetY=OffsetYFor(height,out.scale);
     // Keep every submenu BACK control identical in position and size to SCENARIOS.
     out.back=BuildMainMenuLayout(width,height).buttons[0];
+    for(RectF* r:{&out.graphicsDisplayPanel,&out.graphicsVsyncPanel,&out.graphicsLimitPanel,
+        &out.graphicsWindowed,&out.graphicsFullscreen,&out.graphicsVsyncOff,&out.graphicsVsyncOn,
+        &out.graphicsCapped,&out.graphicsUncapped,&out.graphicsCapInput}){
+        r->left=kGraphicsControlLeft+(r->left-kGraphicsControlLeft)*kGraphicsControlScale;
+        r->right=kGraphicsControlLeft+(r->right-kGraphicsControlLeft)*kGraphicsControlScale;
+        r->top=kGraphicsControlTop+(r->top-kGraphicsControlTop)*kGraphicsControlScale;
+        r->bottom=kGraphicsControlTop+(r->bottom-kGraphicsControlTop)*kGraphicsControlScale;
+    }
     return out;
 }
 inline void ScreenToDesign(float sx,float sy,float scale,float ox,float oy,float& x,float& y){x=(sx-ox)/scale;y=(sy-oy)/scale;}

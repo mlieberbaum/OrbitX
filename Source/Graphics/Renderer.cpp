@@ -2,6 +2,7 @@
 #include "../Core/MenuLayout.h"
 #include "../Core/TexturePaths.h"
 #include "../Core/DisplayPreferences.h"
+#include "../Core/EngineConfig.h"
 #include "../Core/PlanetZoom.h"
 #include "../Core/ScriptPanelLayout.h"
 #include <d3dcompiler.h>
@@ -31,6 +32,7 @@ static std::string HrText(HRESULT hr){ char b[64]; sprintf_s(b,"HRESULT 0x%08X",
 void Renderer::SetError(const std::string&s){m_error=s; std::ofstream(m_root+L"\\Logs\\OrbitX.log",std::ios::app)<<s<<"\n";m_trace.Log([&](auto& out){out<<"ERROR message=\""<<Core::EnvironmentTrace::Escape(s)<<"\"";});}
 
 bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hwnd=hwnd;m_width=w;m_height=h;m_root=root;
+ m_planetOptimizations=Core::LoadPlanetOptimizations(std::filesystem::path(m_root)/L"Config"/L"OrbitX.cfg");
  std::filesystem::path textureRoot;std::string textureError;
  if(!OrbitX::Core::LoadTextureRoot(std::filesystem::path(m_root),textureRoot,textureError)){SetError(textureError);return false;}
  std::filesystem::path surfaceRoot;
@@ -560,29 +562,94 @@ void Renderer::DrawHudText(){
          drawMenuButton(launch,L"LAUNCH",m_scenarioHover==2);
        }
      }else if(m_appState==AppState::Graphics){
-       // Keep the display controls below the enlarged, underlined GRAPHICS heading.
-       drawFmt(L"DISPLAY MODE",subLayout.title.left,subLayout.graphicsWindowed.top-65,m_textLeft.Get(),white.Get());
-       auto drawDisplayOption=[&](const OrbitX::UI::RectF& rect,const wchar_t* label,bool selected,bool hovered){
-         auto shape=makeButton(rect,0.0f);
-         m_d2dContext->FillGeometry(shape.Get(),selected||hovered?greenFill.Get():glass.Get());
-         if(hovered){
-           // Use the same layered neon glow as the main-menu hover treatment.
-           m_d2dContext->DrawGeometry(shape.Get(),greenGlow.Get(),12.0f);
-           m_d2dContext->DrawGeometry(shape.Get(),greenGlow2.Get(),5.0f);
-           m_d2dContext->DrawGeometry(shape.Get(),green.Get(),1.6f);
-         }else{
-           m_d2dContext->DrawGeometry(shape.Get(),selected?green.Get():muted.Get(),1.5f);
-         }
-         centeredButtonText(label,rect,rect.left+24,m_textLeft.Get(),
-                            selected||hovered?green.Get():white.Get(),0.8f);
+       // Floating smoked-glass cards, all on the left. Keep the existing heading,
+       // BACK control and artwork untouched; no full-height backing slab.
+       // Draw the canonical geometry at two-thirds size. BuildSubmenuLayout
+       // applies this identical transform to the clickable rectangles.
+       const OrbitX::UI::SubmenuLayout graphicsLayout{};
+       constexpr float compact=OrbitX::UI::kGraphicsControlScale;
+       const D2D1_MATRIX_3X2_F graphicsTransform{scale*compact,0,0,scale*compact,
+           ox+scale*OrbitX::UI::kGraphicsControlLeft*(1-compact),
+           oy+scale*OrbitX::UI::kGraphicsControlTop*(1-compact)};
+       m_d2dContext->SetTransform(graphicsTransform);
+       Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> quiet,cardBackground;
+       m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.045f,.045f,.045f,.88f),&cardBackground);
+       m_d2dContext->CreateSolidColorBrush(D2D1::ColorF(.56f,.66f,.61f,.85f),&quiet);
+       auto card=[&](const OrbitX::UI::RectF& r,const wchar_t* label){
+         Microsoft::WRL::ComPtr<ID2D1PathGeometry> shape;
+         Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+         if(FAILED(m_d2dFactory->CreatePathGeometry(&shape))||FAILED(shape->Open(&sink)))return;
+         constexpr float cut=16.0f;
+         sink->BeginFigure(D2D1::Point2F(r.left+cut,r.top),D2D1_FIGURE_BEGIN_FILLED);
+         sink->AddLine(D2D1::Point2F(r.right-cut,r.top));sink->AddLine(D2D1::Point2F(r.right,r.top+cut));
+         sink->AddLine(D2D1::Point2F(r.right,r.bottom-cut));sink->AddLine(D2D1::Point2F(r.right-cut,r.bottom));
+         sink->AddLine(D2D1::Point2F(r.left+cut,r.bottom));sink->AddLine(D2D1::Point2F(r.left,r.bottom-cut));
+         sink->AddLine(D2D1::Point2F(r.left,r.top+cut));sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+         if(FAILED(sink->Close()))return;
+         m_d2dContext->FillGeometry(shape.Get(),cardBackground.Get());
+         m_d2dContext->DrawGeometry(shape.Get(),greenGlow.Get(),5.0f);
+         m_d2dContext->DrawGeometry(shape.Get(),green.Get(),1.0f);
+         tracked(label,r.left+30,r.top+18,m_textScenarioButton.Get(),white.Get(),3.0f);
        };
-       drawDisplayOption(subLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
-       drawDisplayOption(subLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
-       drawFmt(L"VSYNC",subLayout.title.left,subLayout.graphicsVsyncOff.top-65,m_textLeft.Get(),white.Get());
-       drawDisplayOption(subLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
-       drawDisplayOption(subLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
-       drawFmt(L"OFF: no application frame-rate cap.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+25,m_textLeft.Get(),white.Get());
-       drawFmt(L"Settings are saved automatically.",subLayout.title.left,subLayout.graphicsVsyncOff.bottom+60,m_textLeft.Get(),white.Get());
+       card(graphicsLayout.graphicsDisplayPanel,L"DISPLAY MODE");
+       card(graphicsLayout.graphicsVsyncPanel,L"VSYNC");
+       card(graphicsLayout.graphicsLimitPanel,L"FRAME RATE LIMIT");
+       // The bundled header face is unusually wide. Fit each option into the
+       // space after its radio circle instead of allowing text to overrun it.
+       auto optionLabel=[&](const OrbitX::UI::RectF& r,const wchar_t* label){
+         Microsoft::WRL::ComPtr<IDWriteTextLayout> text;
+         const UINT32 length=static_cast<UINT32>(wcslen(label));
+         if(FAILED(m_dwriteFactory->CreateTextLayout(label,length,m_textScenarioButton.Get(),1000,120,&text)))return;
+         const DWRITE_TEXT_RANGE range{0,length};
+         text->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+         text->SetFontSize(16.0f,range);
+         Microsoft::WRL::ComPtr<IDWriteTextLayout1> spaced;
+         if(SUCCEEDED(text.As(&spaced)))spaced->SetCharacterSpacing(0,1.4f,0,range);
+         DWRITE_TEXT_METRICS metrics{};
+         if(FAILED(text->GetMetrics(&metrics)))return;
+         const float available=r.Width()-84.0f-18.0f;
+         if(metrics.widthIncludingTrailingWhitespace>available){
+           const float fit=available/metrics.widthIncludingTrailingWhitespace;
+           text->SetFontSize(16.0f*fit,range);
+           if(spaced)spaced->SetCharacterSpacing(0,1.4f*fit,0,range);
+           if(FAILED(text->GetMetrics(&metrics)))return;
+         }
+         m_d2dContext->DrawTextLayout(D2D1::Point2F(r.left+84,r.top+(r.Height()-metrics.height)*.5f-metrics.top),text.Get(),white.Get());
+       };
+       auto option=[&](const OrbitX::UI::RectF& r,const wchar_t* label,bool selected,bool hovered){
+         const auto shape=D2D1::RoundedRect(D2D1::RectF(r.left,r.top,r.right,r.bottom),10,10);
+         auto* gradient=selected?hotGradient.Get():glassGradient.Get();
+         if(gradient){gradient->SetStartPoint(D2D1::Point2F(0,r.top));gradient->SetEndPoint(D2D1::Point2F(0,r.bottom));}
+         m_d2dContext->FillRoundedRectangle(shape,gradient?static_cast<ID2D1Brush*>(gradient):glass.Get());
+         if(selected||hovered){
+           m_d2dContext->DrawRoundedRectangle(shape,greenGlow.Get(),10.0f);
+           m_d2dContext->DrawRoundedRectangle(shape,greenGlow2.Get(),4.0f);
+         }
+         m_d2dContext->DrawRoundedRectangle(shape,selected||hovered?green.Get():quiet.Get(),1.5f);
+         const auto center=D2D1::Point2F(r.left+40,(r.top+r.bottom)*.5f);
+         const auto ring=D2D1::Ellipse(center,14,14);
+         if(selected)m_d2dContext->DrawEllipse(ring,greenGlow2.Get(),8.0f);
+         m_d2dContext->DrawEllipse(ring,selected?green.Get():quiet.Get(),1.8f);
+         if(selected)m_d2dContext->FillEllipse(D2D1::Ellipse(center,8,8),green.Get());
+         optionLabel(r,label);
+       };
+       option(graphicsLayout.graphicsWindowed,L"WINDOWED",!m_fullscreen,m_graphicsHover==0);
+       option(graphicsLayout.graphicsFullscreen,L"FULL SCREEN",m_fullscreen,m_graphicsHover==1);
+       option(graphicsLayout.graphicsVsyncOff,L"OFF",!m_vsync,m_graphicsHover==2);
+       option(graphicsLayout.graphicsVsyncOn,L"ON",m_vsync,m_graphicsHover==3);
+       option(graphicsLayout.graphicsCapped,L"CAPPED",m_frameLimit.enabled,m_graphicsHover==4);
+       option(graphicsLayout.graphicsUncapped,L"UNCAPPED",!m_frameLimit.enabled,m_graphicsHover==5);
+       const auto& input=graphicsLayout.graphicsCapInput;
+       auto* inputBrush=m_frameLimit.enabled?white.Get():quiet.Get();
+       const auto inputShape=D2D1::RoundedRect(D2D1::RectF(input.left,input.top,input.right,input.bottom),9,9);
+       m_d2dContext->FillRoundedRectangle(inputShape,glass.Get());
+       if(m_frameLimit.enabled&&(m_frameCapFocused||m_graphicsHover==6))m_d2dContext->DrawRoundedRectangle(inputShape,greenGlow2.Get(),5.0f);
+       m_d2dContext->DrawRoundedRectangle(inputShape,m_frameLimit.enabled?quiet.Get():muted.Get(),m_frameCapFocused?2.0f:1.0f);
+       if(m_frameCapFocused&&m_frameCapReplace)m_d2dContext->FillRectangle(D2D1::RectF(input.left+10,input.top+8,input.right-10,input.bottom-8),greenFill.Get());
+       auto value=m_frameCapText+(m_frameCapFocused?L"_":L"");
+       centeredButtonText(value.c_str(),input,input.left+24,m_textMenu.Get(),inputBrush,1.0f);
+       centeredButtonText(L"FPS",input,input.right+28,m_textScenarioButton.Get(),inputBrush,2.2f);
+       m_d2dContext->SetTransform(uiTransform);
      }else drawFmt(L"Placeholder - interface coming next",subLayout.title.left,subLayout.title.bottom+45,m_textLeft.Get(),white.Get());
    }
    m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
@@ -749,6 +816,11 @@ void Renderer::Resize(UINT width,UINT height){
  if(log)log<<"Resize: client="<<m_width<<"x"<<m_height<<" swapchain="<<m_width<<"x"<<m_height<<" aspect="<<(double(m_width)/double(m_height))<<"\n";
 }
 void Renderer::OnKeyDown(WPARAM k){
+ if(m_appState==AppState::Graphics&&m_frameCapFocused){
+   if(k=='A'&&(GetKeyState(VK_CONTROL)&0x8000)){m_frameCapReplace=true;return;}
+   if(k==VK_ESCAPE){CommitFrameCapInput(false);return;}
+   if(k==VK_TAB){CommitFrameCapInput();return;}
+ }
  m_trace.Log([&](auto& out){out<<"INPUT_KEY key="<<k<<" ctrl="<<bool(GetKeyState(VK_CONTROL)&0x8000);});
  if(m_appState==AppState::Simulation && (GetKeyState(VK_CONTROL)&0x8000)) {
    if(k=='R'){OnMouseUp();m_scriptPanelOpen=!m_scriptPanelOpen;m_scriptHover=-1;m_scriptNameFocused=false;if(m_scriptPanelOpen&&m_scriptOperation==ScriptOperation::Idle)RefreshScripts();TraceCamera("SCRIPT_PANEL_TOGGLE");return;}
@@ -778,6 +850,7 @@ void Renderer::OnLeftClick(int x,int y){
    if(hit>=0){m_menuSelection=hit;OnKeyDown(VK_RETURN);} return;
  }
  const auto layout=OrbitX::UI::BuildSubmenuLayout((float)m_width,(float)m_height);
+ if(m_appState==AppState::Graphics)CommitFrameCapInput();
  if(OrbitX::UI::HitTestButton(layout.back,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_appState=AppState::MainMenu;m_hoverSelection=-1;m_scenarioHover=-1;m_graphicsHover=-1;m_mouseNavigation=false;return;}
  if(m_appState==AppState::ScenarioSelect){
    const auto hit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
@@ -787,18 +860,50 @@ void Renderer::OnLeftClick(int x,int y){
    return;
  }
  if(m_appState==AppState::Graphics){
-   if(OrbitX::UI::HitTestButton(layout.graphicsWindowed,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(false);
-   else if(OrbitX::UI::HitTestButton(layout.graphicsFullscreen,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(true);
-   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOff,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(false);
-   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOn,18.0f,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(true);
+   if(OrbitX::UI::HitTestButton(layout.graphicsWindowed,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(false);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsFullscreen,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFullscreen(true);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOff,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(false);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsVsyncOn,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetVSync(true);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsCapped,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFrameLimit(true,m_frameLimit.fps);
+   else if(OrbitX::UI::HitTestButton(layout.graphicsUncapped,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY))SetFrameLimit(false,m_frameLimit.fps);
+   else if(m_frameLimit.enabled&&OrbitX::UI::HitTestButton(layout.graphicsCapInput,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY)){m_frameCapFocused=true;m_frameCapReplace=true;}
  }
 }
 
 
+void Renderer::SaveUserPreferences(){
+ CommitFrameCapInput();
+ if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync,m_frameLimit.enabled,m_frameLimit.fps}))SetError("Cannot save display preferences");
+}
+void Renderer::SetFrameLimit(bool enabled,unsigned fps){
+ m_frameLimit={enabled,fps>=Core::FrameLimit::MinFPS&&fps<=Core::FrameLimit::MaxFPS?fps:Core::FrameLimit::DefaultFPS};
+ m_frameCapText=std::to_wstring(m_frameLimit.fps);m_frameCapFocused=false;m_frameCapReplace=false;
+ m_trace.Log([&](auto& out){out<<"FRAME_RATE_LIMIT enabled="<<enabled<<" fps="<<m_frameLimit.fps;});
+}
+void Renderer::CommitFrameCapInput(bool accept){
+ if(!m_frameCapFocused)return;
+ unsigned fps=m_frameLimit.fps;
+ if(accept&&Core::ParseFrameLimit(std::wstring_view(m_frameCapText),fps))SetFrameLimit(m_frameLimit.enabled,fps);
+ else{m_frameCapText=std::to_wstring(m_frameLimit.fps);m_frameCapFocused=false;m_frameCapReplace=false;}
+}
+bool Renderer::FrameCapCharacter(wchar_t c){
+ if(m_appState!=AppState::Graphics||!m_frameCapFocused||!m_frameLimit.enabled)return false;
+ if(c==L'\r'){CommitFrameCapInput();return true;}
+ if(c==L'\b'){
+   if(m_frameCapReplace)m_frameCapText.clear();else if(!m_frameCapText.empty())m_frameCapText.pop_back();
+   m_frameCapReplace=false;return true;
+ }
+ if(c>=L'0'&&c<=L'9'){
+   if(m_frameCapReplace)m_frameCapText.clear();
+   m_frameCapReplace=false;
+   if(m_frameCapText.size()<5)m_frameCapText+=c;
+ }
+ return true;
+}
 void Renderer::SetVSync(bool enabled){
  m_vsync=enabled;
  m_trace.Log([&](auto& out){out<<"VSYNC enabled="<<enabled;});
- if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
+ SaveUserPreferences();
 }
 void Renderer::SetFullscreen(bool enabled){
  if(enabled==m_fullscreen)return;
@@ -812,7 +917,7 @@ void Renderer::SetFullscreen(bool enabled){
  }else{
    SetWindowLongPtr(m_hwnd,GWL_STYLE,m_windowedStyle);SetWindowPlacement(m_hwnd,&m_windowedPlacement);SetWindowPos(m_hwnd,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);m_fullscreen=false;
  }
- if(!Core::SaveDisplayPreferences(std::filesystem::path(m_root)/L"Config"/L"UserPreferences.cfg",{m_fullscreen,m_vsync}))SetError("Cannot save display preferences");
+ SaveUserPreferences();
 }
 void Renderer::OnMouseDown(int,int){
  if(m_appState!=AppState::Simulation||m_drag||m_scriptPanelOpen||m_scriptOperation==ScriptOperation::Playing)return;
@@ -844,10 +949,14 @@ void Renderer::OnMouseMove(int x,int y){
    m_scenarioHover=-1;
    m_graphicsHover=-1;
    if(m_appState==AppState::Graphics){
-     if(hit(layout.graphicsWindowed))m_graphicsHover=0;
-     else if(hit(layout.graphicsFullscreen))m_graphicsHover=1;
-     else if(hit(layout.graphicsVsyncOff))m_graphicsHover=2;
-     else if(hit(layout.graphicsVsyncOn))m_graphicsHover=3;
+     const auto graphicsHit=[&](const OrbitX::UI::RectF& r){return OrbitX::UI::HitTestButton(r,0,(float)x,(float)y,layout.scale,layout.offsetX,layout.offsetY);};
+     if(graphicsHit(layout.graphicsWindowed))m_graphicsHover=0;
+     else if(graphicsHit(layout.graphicsFullscreen))m_graphicsHover=1;
+     else if(graphicsHit(layout.graphicsVsyncOff))m_graphicsHover=2;
+     else if(graphicsHit(layout.graphicsVsyncOn))m_graphicsHover=3;
+     else if(graphicsHit(layout.graphicsCapped))m_graphicsHover=4;
+     else if(graphicsHit(layout.graphicsUncapped))m_graphicsHover=5;
+     else if(m_frameLimit.enabled&&graphicsHit(layout.graphicsCapInput))m_graphicsHover=6;
    }
    if(m_appState==AppState::ScenarioSelect){
      if(hit(layout.solarSystem))m_scenarioHover=0;
