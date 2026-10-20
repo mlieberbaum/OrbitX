@@ -23,10 +23,10 @@ int main(){
     assert(ParseFrameLimit(L"1",wide)&&wide==1);
     assert(ParseFrameLimit(L"10000",wide)&&wide==10000);
     assert(ParseFrameLimit(L"00144",wide)&&wide==144);
-    FrameLimit limit{true,144};assert(limit.Effective(false)==144&&limit.Effective(true)==0);
-    // Bypass never mutates the preference, so every exit path restores it.
-    for(int i=0;i<4;++i){assert(limit.Effective(true)==0);assert(limit.Effective(false)==144);}
-    limit.enabled=false;assert(limit.Effective(false)==0&&limit.Effective(true)==0&&limit.fps==144);
+    // Script mode is intentionally absent: only the user's cap setting matters.
+    FrameLimit limit{true,144};assert(limit.Effective()==144);
+    limit.enabled=false;assert(limit.Effective()==0&&limit.fps==144);
+    limit.enabled=true;assert(limit.Effective()==144);
     FramePacer pacer;assert(pacer.Delay(0,100)==0);pacer.Begin(0,100);
     assert(pacer.Delay(0,100)==10000000&&pacer.Delay(9999999,100)==1);
     assert(pacer.Delay(10000000,100)==0);pacer.Begin(10000000,100);

@@ -342,7 +342,7 @@ Small late wakes shorten later waits instead of accumulating drift; lateness of
 at least one whole interval resets the schedule to now, with the following frame
 due one interval later. There is no spin, measured-FPS feedback or backlog loop.
 When rendering is slower than the cap, no limiter sleep is added. Uncapped frames
-bypass waiting. Cap/rate changes, benchmark transitions, minimize/restore, power
+bypass waiting. Cap/rate changes, minimize/restore, power
 events and forced resize redraws start a fresh schedule.
 
 Windows input interrupts waits, and bounded message batches keep rendering from
@@ -352,16 +352,16 @@ failed handle. A final short Sleep prevents a hot loop if message waiting fails.
 Minimized windows block between message checks. Actual elapsed time still drives
 simulation and scripts; forced modal-resize redraws remain immediate.
 
-Benchmark recording and playback bypass the application cap for their entire
-active session, including loading, then automatically resume the saved cap on
-completion, cancellation, scenario exit or failure. Full, Regression and None
-retain the selected limit. VSync remains independent: turn it off for uncapped
-benchmark measurements. Regression and performance file formats are unchanged;
+All script modes, including Benchmark recording and playback, respect the user's
+selected frame cap. Scripts never enable or disable planet optimizations: that
+startup setting remains under manual control in OrbitX.cfg. For uncapped benchmark
+measurements, manually select Uncapped and turn VSync off before running the script.
+Regression and performance file formats are unchanged;
 Full session headers include the frame-cap settings. Tile selection, streaming,
 cache policy, shaders and draw submission are unchanged.
 
 FrameLimiterTests.cpp covers 1.5 million modeled frame steps, late-wake accuracy,
-capacity transitions, clock/arithmetic edges, rate changes, stalls, benchmark bypass,
+capacity transitions, clock/arithmetic edges, rate changes, stalls, manual cap selection,
 preference persistence/defaults/malformed values and scaled control hit-testing.
 FrameWaiterTests.cpp fault-injects the actual Windows wait wrapper using an
 explicit test-only include path, including timer/input/timeout wakes, creation,
@@ -370,7 +370,9 @@ arming and wait failures, finite timeout conversions and final blocking fallback
 The mock is not included in any Visual Studio game configuration.
 
 Rebuild Env_Test_Release in Visual Studio, select Capped / 120 and verify FPS;
-run a Benchmark script and confirm uncapped FPS and restoration after finish/stop.
+run a Benchmark script and confirm the selected cap remains effective, then
+manually select Uncapped and rerun. Both selections must remain unchanged after
+finish/stop.
 Exit/relaunch to confirm persistence, test Uncapped's disabled field, and compare
 Regression output to the existing baseline.
 
@@ -385,8 +387,8 @@ Off is the default and runs the original per-frame selection, upload-completion
 scan, descriptor set allocation and draw-pin bookkeeping from 2d2dad9. Set On
 to enable f423679's settled-view reuse, fence scan shortcut, descriptor occupancy
 bitset and pressure-only pin bookkeeping. This is a startup-only experimental
-switch, independent of the frame cap; Benchmark bypasses only the cap and tests
-whichever implementation you selected. Display/VSync/exit saves only update
+switch, independent of the frame cap; Benchmark respects both settings and tests
+whichever implementation and cap you selected. Display/VSync/exit saves only update
 UserPreferences.cfg and never rewrite OrbitX.cfg. Obsolete PlanetOptimizations
 entries in user preferences are ignored and removed on the next preference save.
 Full session headers record it; regression/performance formats remain unchanged. Regression outputs should match in both modes.

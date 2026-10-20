@@ -9,7 +9,8 @@ struct FrameLimit {
     static constexpr unsigned MinFPS=1,MaxFPS=10000,DefaultFPS=120;
     bool enabled=false;
     unsigned fps=DefaultFPS;
-    unsigned Effective(bool benchmark)const {return enabled&&!benchmark?fps:0;}
+    // Every script mode respects the manually selected cap.
+    unsigned Effective()const {return enabled?fps:0;}
 };
 inline bool ParseFrameLimit(std::string_view text,unsigned& value){
     if(text.empty())return false;

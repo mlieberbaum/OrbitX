@@ -51,7 +51,7 @@ public:
     void SetVSync(bool enabled);
     bool IsVSync() const { return m_vsync; }
     void SetFrameLimit(bool enabled,unsigned fps);
-    unsigned EffectiveFrameLimit()const {return m_frameLimit.Effective(m_scriptOperation!=ScriptOperation::Idle&&m_scriptLogging==ScriptLogging::Benchmark);}
+    unsigned EffectiveFrameLimit()const {return m_frameLimit.Effective();}
     void SaveUserPreferences();
 private:
     void CommitFrameCapInput(bool accept=true);
