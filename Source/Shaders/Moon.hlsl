@@ -13,7 +13,8 @@ PSIn VSMain(VSIn i){
     o.pos=mul(float4(position,1),gMVP);o.normal=normalize(mul(float4(normal,0),gModel).xyz);o.uv=i.uv;return o;
 }
 float4 PSMain(PSIn i):SV_TARGET {
-    float3 albedo=gTex.Sample(gSamp,gUv.xy+i.uv*gUv.zw).rgb;
+    float4 texel=gTex.Sample(gSamp,gUv.xy+i.uv*gUv.zw);
+    float3 albedo=texel.rgb;
 #ifdef PLANET_DEBUG_MODE
     float light=1;
 #else
@@ -23,5 +24,15 @@ float4 PSMain(PSIn i):SV_TARGET {
     if(gDebug.y>0)color=lerp(color,gColor.rgb,0.16);
     float2 edge=min(i.uv,1-i.uv)/max(fwidth(i.uv),float2(1e-7,1e-7));
     if(gDebug.x>0 && min(edge.x,edge.y)<1.25)color=gColor.rgb;
-    return float4(color,1);
+    // The opaque base ignores alpha (including DDS_ALPHA_MODE_OPAQUE).
+    // Only the depth-equal overlay PSO consumes straight texture alpha.
+    return float4(color,gDebug.w>0?texel.a:1);
+}
+
+// Separate debug pass for layered patches: never tint the same composite twice.
+float4 OverlayPSMain(PSIn i):SV_TARGET {
+    float alpha=gDebug.y>0?0.16:0;
+    float2 edge=min(i.uv,1-i.uv)/max(fwidth(i.uv),float2(1e-7,1e-7));
+    if(gDebug.x>0 && min(edge.x,edge.y)<1.25)alpha=1;
+    return float4(gColor.rgb,alpha);
 }

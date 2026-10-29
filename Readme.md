@@ -27,6 +27,52 @@ startup error. **Moon.jpg is neither loaded nor required**, including for the
 scenario thumbnail; optional menu artwork is independent. No imagery belongs in
 Git. Older global directories 01–03 are not used by this quadtree.
 
+### Partial high-resolution DDS coverage
+
+Surface DDS files may contain straight alpha. Each visible geometry patch uses
+its nearest resident opaque texture as a base, then draws resident partial
+ancestors and child detail from coarse to fine over the same geometry. Missing,
+failed or pending intermediate textures fall back safely to the opaque coverage.
+Opaque textures keep one surface draw. Layered patches use depth-equal alpha
+passes without depth writes; debug tint and boundaries are applied once after
+compositing. LOD labels continue to identify the selected geometry patch.
+
+This supports the PNG converter's 512×512 BC1 opaque tiles and BC3 partial tiles,
+including several consecutive partially covered levels 12–15. Missing DDS tiles
+can still be omitted. Alpha zero reveals the ancestor; alpha one shows the child;
+fractional coverage blends them. Keep the existing opaque level-4 roots and lower
+levels available. BC1/BC2/BC3 opacity is checked across all mip texels during DDS
+reading. BC7 is conservatively treated as potentially transparent unless its
+DX10 header declares `DDS_ALPHA_MODE_OPAQUE`; BC7 roots must declare that mode.
+Premultiplied-alpha assets are not the converter's output and are not supported
+by this straight-alpha blend path.
+
+Every sampled texture participates in draw fences, cache pinning, LRU touches,
+and the optional settled-view cache. Snapshot stability also tracks intermediate
+layers while keeping the existing canonical log fields. The texture directory
+layout, camera controls, source selection, frame cap and graphics settings are
+unchanged. Source/runtime Moon shader copies are kept identical.
+
+Portable checks (C++20 / Python 3, outside the application build):
+
+```sh
+g++ -std=c++20 -O2 -pthread Source/Tests/PlanetAlphaTests.cpp -o planet-alpha-tests
+./planet-alpha-tests
+python Source/Tests/PlanetAlphaRendererTests.py
+```
+
+The Python check compiles the actual draw and pipeline-state method bodies with
+command-recording GPU stubs and address/undefined-behavior sanitizers. It does not
+replace a native Windows shader or Direct3D build. If LeakSanitizer cannot operate
+in a restricted test host, use `ASAN_OPTIONS=detect_leaks=0` for that test process.
+
+After rebuilding in Visual Studio, point `SurfaceTiles` at the existing hierarchy
+plus the converter outputs. Check a small footprint at levels 12–15: inside imagery
+must be sharp, gaps must show the old Moon texture, and camera zoom/pan/freeze,
+streaming and Ctrl+O modes must preserve coverage. Also compare the original
+opaque-only hierarchy. Native Windows compilation, shader compilation, GPU visual
+appearance and frame-rate impact require local verification.
+
 FPS is displayed below TIME 1X in every build, with a half-second averaging
 interval. It is visible only in the active simulation, never in menus or submenus. This reflects render-loop throughput,
 including presentation pacing. Graphics provides persistent **VSync OFF / ON**;

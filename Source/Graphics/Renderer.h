@@ -15,6 +15,7 @@
 #include <string>
 #include "../Core/SimulationState.h"
 #include "../Core/PlanetQuadtree.h"
+#include "../Core/PlanetTextureLayers.h"
 #include <set>
 #include <chrono>
 #include <array>
@@ -168,7 +169,7 @@ private:
     UINT m_rtvStride{}; Microsoft::WRL::ComPtr<ID3D12Resource> m_back[FrameCount],m_depth;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_alloc[FrameCount]; Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_cmd;
     Microsoft::WRL::ComPtr<ID3D12Fence> m_fence; UINT64 m_fenceValue[FrameCount]{},m_nextFenceValue=0; HANDLE m_fenceEvent{}; UINT m_frame{};
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_sceneRoot; Microsoft::WRL::ComPtr<ID3D12PipelineState> m_scenePSO;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_sceneRoot; Microsoft::WRL::ComPtr<ID3D12PipelineState> m_scenePSO,m_sceneAlphaPSO,m_sceneOverlayPSO;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_cb; UINT8* m_cbPtr{};
 
     static constexpr UINT TileCapacity=8192;
@@ -177,8 +178,13 @@ private:
         Microsoft::WRL::ComPtr<ID3D12Resource> texture;
         UINT slot{};UINT64 bytes{},touched{},lastDrawFence{},uploadFence{};
         bool ready=false;
+        bool mayHaveAlpha=true;
     };
-    struct TileDraw { Core::TileId id, source; UINT slot{},grid{}; float uv[4]{}; bool operator==(const TileDraw&) const = default; };
+    struct TileDraw {
+        Core::TileId id, source; UINT slot{},grid{}; float uv[4]{};
+        std::vector<Core::PlanetTextureLayer> layers;
+        bool operator==(const TileDraw&) const = default;
+    };
     struct PatchMesh {
         Microsoft::WRL::ComPtr<ID3D12Resource> vb,ib;
         D3D12_VERTEX_BUFFER_VIEW vbv{};D3D12_INDEX_BUFFER_VIEW ibv{};UINT count{};

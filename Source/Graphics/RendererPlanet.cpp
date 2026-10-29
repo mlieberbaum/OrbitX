@@ -49,7 +49,7 @@ bool Renderer::QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatc
     // Keep traversal coverage resident, and never recycle resources referenced by either queue.
     std::set<UINT> pinned;
     if(!m_planetOptimizations || m_tileBytes+allocation>TileBudget || m_tiles.size()>=TileCapacity)
-        for(const auto& draw:m_tileDraws)pinned.insert(draw.slot);
+        for(const auto& draw:m_tileDraws)for(const auto& layer:draw.layers)pinned.insert(m_tiles.at(layer.source).slot);
     auto completed=m_fence->GetCompletedValue();
     while(m_tileBytes+allocation>TileBudget || m_tiles.size()>=TileCapacity) {
         auto oldest=m_tiles.end();
@@ -90,7 +90,7 @@ bool Renderer::QueuePlanetTile(Core::TileId id,const DdsSurface& data,UploadBatc
     D3D12_RESOURCE_BARRIER barrier{};barrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;barrier.Transition.pResource=texture.Get();barrier.Transition.StateBefore=D3D12_RESOURCE_STATE_COPY_DEST;barrier.Transition.StateAfter=D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;barrier.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;batch.commands->ResourceBarrier(1,&barrier);
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};srv.Format=desc.Format;srv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;srv.Texture2D.MipLevels=data.mips;
     auto handle=m_srvHeap->GetCPUDescriptorHandleForHeapStart();handle.ptr+=size_t(slot)*m_srvStride;m_device->CreateShaderResourceView(texture.Get(),&srv,handle);
-    m_tiles.emplace(id,TileResource{texture,slot,allocation,m_tileClock,0,0,false});if(m_planetOptimizations)m_descriptorSlots.MarkUsed(slot);m_tileBytes+=allocation;
+    m_tiles.emplace(id,TileResource{texture,slot,allocation,m_tileClock,0,0,false,data.mayHaveAlpha});if(m_planetOptimizations)m_descriptorSlots.MarkUsed(slot);m_tileBytes+=allocation;
     m_trace.Log([&](auto& out){out<<"TILE_UPLOAD_PREPARED tile="<<id.level<<"/"<<id.row<<"/"<<id.column<<" slot="<<slot
         <<" bytes="<<allocation<<" cache_bytes="<<m_tileBytes<<" width="<<data.width<<" height="<<data.height
         <<" mips="<<data.mips<<" format="<<data.format<<" batch_offset="<<batch.used<<" upload_bytes="<<total;});
@@ -119,7 +119,9 @@ void Renderer::CollectPlanetUploads() {
 bool Renderer::LoadPlanetTile(Core::TileId id) {
     // The only blocking path is startup of the two required DDS roots.
     try {
-        auto data=DdsSurface::Read(m_planet.files.at(id));auto& batch=m_uploadBatches[0];batch.tiles.clear();batch.used=0;
+        auto data=DdsSurface::Read(m_planet.files.at(id));
+        if(id.level==4&&data.mayHaveAlpha){SetError("DDS roots must provide opaque coverage (BC7 roots must declare DDS_ALPHA_MODE_OPAQUE)");return false;}
+        auto& batch=m_uploadBatches[0];batch.tiles.clear();batch.used=0;
         if(FAILED(batch.allocator->Reset()) || FAILED(batch.commands->Reset(batch.allocator.Get(),nullptr)))return false;
         if(!QueuePlanetTile(id,data,batch)||!SubmitPlanetUploads(batch))return false;
         if(FAILED(m_uploadFence->SetEventOnCompletion(batch.fence,m_fenceEvent)))return false;
@@ -204,22 +206,24 @@ bool Renderer::UpdatePlanet() {
     m_uploadCpuMs=m_uploadCpuMs*.9+Milliseconds(start)*.1;
     m_tileDraws.clear();m_renderedLOD=0;m_residentLOD=0;
     for(auto id:m_planet.leaves) {
-        TileDraw draw{};draw.id=id;draw.source=id;
-        while(!resident(draw.source)||!m_tiles.contains(draw.source)||!m_tiles.at(draw.source).ready) {
-            if(draw.source.level==4){SetError("No resident DDS root for selected patch");return false;}draw.source=draw.source.Parent();
-        }
-        auto& tile=m_tiles.at(draw.source);tile.touched=m_tileClock;draw.slot=tile.slot;
+        TileDraw draw{};draw.id=id;
+        draw.layers=Core::PlanetTextureLayers(id,[&](Core::TileId source)->std::optional<bool>{
+            auto it=m_tiles.find(source);
+            if(it==m_tiles.end()||!it->second.ready)return std::nullopt;
+            return it->second.mayHaveAlpha;
+        });
+        if(draw.layers.empty()){SetError("No resident opaque DDS ancestor for selected patch");return false;}
+        draw.source=draw.layers.back().source;draw.slot=m_tiles.at(draw.source).slot;
+        std::copy(draw.layers.back().uv.begin(),draw.layers.back().uv.end(),draw.uv);
+        for(const auto& layer:draw.layers){m_tiles.at(layer.source).touched=m_tileClock;m_planet.dependencies.insert(layer.source);}
         m_renderedLOD=std::max(m_renderedLOD,draw.source.level);
-        auto bounds=Core::Bounds(id),sourceBounds=Core::Bounds(draw.source);
-        draw.uv[0]=float((bounds.west-sourceBounds.west)/(sourceBounds.east-sourceBounds.west));draw.uv[1]=float((sourceBounds.north-bounds.north)/(sourceBounds.north-sourceBounds.south));
-        draw.uv[2]=float((bounds.east-bounds.west)/(sourceBounds.east-sourceBounds.west));draw.uv[3]=float((bounds.north-bounds.south)/(sourceBounds.north-sourceBounds.south));
         draw.grid=static_cast<UINT>(std::min(3,id.level-4));m_tileDraws.push_back(draw);
     }
     for(const auto& [id,tile]:m_tiles)if(tile.ready)m_residentLOD=std::max(m_residentLOD,id.level);
     if(m_planetOptimizations&&m_planet.requests.empty()&&!m_deferredTile&&m_failedTiles.empty()&&
        std::all_of(m_tiles.begin(),m_tiles.end(),[](const auto& entry){return entry.second.ready;})){
         m_settledTouchedTiles.reserve(m_tileDraws.size());
-        for(const auto& draw:m_tileDraws)m_settledTouchedTiles.push_back(&m_tiles.at(draw.source));
+        for(const auto& draw:m_tileDraws)for(const auto& layer:draw.layers)m_settledTouchedTiles.push_back(&m_tiles.at(layer.source));
         m_settledPlanetCache.Remember(key,m_planet.leaves);
     }
     return true;
@@ -269,17 +273,33 @@ bool Renderer::BuildPlanetMesh() {
 }
 void Renderer::DrawPlanet() {
     m_cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    auto* pipeline=m_scenePSO.Get();m_cmd->SetPipelineState(pipeline);
+    auto use=[&](ID3D12PipelineState* state){if(pipeline!=state){m_cmd->SetPipelineState(state);pipeline=state;}};
     for(const auto& draw:m_tileDraws) {
         const auto& mesh=m_patchMeshes[draw.grid];m_cmd->IASetVertexBuffers(0,1,&mesh.vbv);m_cmd->IASetIndexBuffer(&mesh.ibv);
-        auto descriptor=m_srvHeap->GetGPUDescriptorHandleForHeapStart();descriptor.ptr+=UINT64(draw.slot)*m_srvStride;m_cmd->SetGraphicsRootDescriptorTable(1,descriptor);
         auto color=Palette[(draw.id.level-1)%Palette.size()];auto b=Core::Bounds(draw.id);double rad=Core::PlanetPi/180;
         double step=(b.north-b.south)*rad/(128u>>draw.grid);
+        const bool layered=draw.layers.size()>1,debug=m_tileOverlayMode>1;
         float constants[16]={draw.uv[0],draw.uv[1],draw.uv[2],draw.uv[3],float((color>>16)&255)/255,float((color>>8)&255)/255,float(color&255)/255,1,
-            m_tileOverlayMode>1?1.f:0.f,m_tileOverlayMode>1?1.f:0.f,float(std::max(1e-6,1-std::cos(step))+1e-5),0,
+            debug&&!layered?1.f:0.f,debug&&!layered?1.f:0.f,float(std::max(1e-6,1-std::cos(step))+1e-5),0,
             float(b.west*rad),float(b.north*rad),float((b.east-b.west)*rad),float((b.north-b.south)*rad)};
-        m_cmd->SetGraphicsRoot32BitConstants(2,16,constants,0);m_cmd->DrawIndexedInstanced(mesh.count,1,0,0,0);
-        m_tiles.at(draw.source).lastDrawFence=m_nextFenceValue+1;
+        for(size_t i=0;i<draw.layers.size();++i) {
+            const auto& layer=draw.layers[i];auto& tile=m_tiles.at(layer.source);
+            use(i?m_sceneAlphaPSO.Get():m_scenePSO.Get());
+            auto descriptor=m_srvHeap->GetGPUDescriptorHandleForHeapStart();descriptor.ptr+=UINT64(tile.slot)*m_srvStride;
+            m_cmd->SetGraphicsRootDescriptorTable(1,descriptor);
+            std::copy(layer.uv.begin(),layer.uv.end(),constants);constants[11]=i?1.f:0.f;
+            m_cmd->SetGraphicsRoot32BitConstants(2,16,constants,0);m_cmd->DrawIndexedInstanced(mesh.count,1,0,0,0);
+            tile.lastDrawFence=m_nextFenceValue+1;
+        }
+        // Apply tint and boundaries once to the completed composite. Keep the
+        // original in-shader debug path for the common single opaque draw.
+        if(layered&&debug) {
+            use(m_sceneOverlayPSO.Get());constants[8]=constants[9]=1.f;
+            m_cmd->SetGraphicsRoot32BitConstants(2,16,constants,0);m_cmd->DrawIndexedInstanced(mesh.count,1,0,0,0);
+        }
     }
+    use(m_scenePSO.Get());
 }
 void Renderer::DrawPlanetLabels() {
     // Use the exact scene matrix written for this frame, including near-plane changes.

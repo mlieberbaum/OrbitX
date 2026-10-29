@@ -1,5 +1,6 @@
 #pragma once
 #include "CameraScript.h"
+#include "PlanetTextureLayers.h"
 #include <bit>
 #include <array>
 
@@ -27,6 +28,8 @@ struct RegressionDraw {
 struct RegressionSnapshot {
     ScriptCamera camera;std::vector<TileId> leaves;std::vector<RegressionDraw> draws;
     std::array<float,35> scene{};
+    // In-memory stability includes every alpha source; canonical log fields stay unchanged.
+    std::vector<std::vector<PlanetTextureLayer>> textureLayers;
     bool operator==(const RegressionSnapshot&)const=default;
 };
 // Render-thread-only writer. Classic locale, LF newlines, sorted tile records,

@@ -235,7 +235,7 @@ Core::RegressionSnapshot Renderer::RegressionSnapshot()const{
     for(const auto& draw:m_tileDraws){
         Core::RegressionDraw d;d.id=draw.id;d.source=draw.source;d.grid=draw.grid;
         if(draw.grid<m_patchMeshes.size())d.indexCount=m_patchMeshes[draw.grid].count;
-        std::copy(std::begin(draw.uv),std::end(draw.uv),d.uv.begin());snapshot.draws.push_back(d);
+        std::copy(std::begin(draw.uv),std::end(draw.uv),d.uv.begin());snapshot.draws.push_back(d);snapshot.textureLayers.push_back(draw.layers);
     }
     SceneCB scene{};std::memcpy(&scene,m_cbPtr+256*m_frame,sizeof(scene));size_t index=0;
     for(const auto& row:scene.mvp.m)for(float value:row)snapshot.scene[index++]=value;
@@ -261,6 +261,9 @@ const char* Renderer::RegressionSnapshotStatus(const Core::RegressionSnapshot& s
             else if(source==m_tiles.end()||!source->second.ready)status="PENDING";
             else if(source->second.slot!=draw.slot)status="BINDING_INVALID";
             else if(draw.id!=draw.source&&m_planet.files.contains(draw.id))status="FALLBACK_PENDING";
+            if(draw.layers.empty())status="COVERAGE_INVALID";
+            for(const auto& layer:draw.layers){const auto it=m_tiles.find(layer.source);if(it==m_tiles.end()||!it->second.ready)status="PENDING";}
+            if(!draw.layers.empty()){const auto base=m_tiles.find(draw.layers.front().source);if(base!=m_tiles.end()&&base->second.mayHaveAlpha)status="COVERAGE_INVALID";}
         }
     }
     return status;
@@ -288,9 +291,9 @@ void Renderer::CaptureRegression(){
         // Cheap continuous coverage checks between the 10-Hz full integrity checks.
         if(!m_planet.requests.empty())m_snapshotReady=false;
         if(m_haveSnapshot){
-            if(m_planet.leaves!=m_previousRegressionSnapshot.leaves||m_tileDraws.size()!=m_previousRegressionSnapshot.draws.size())m_snapshotChanged=true;
+            if(m_planet.leaves!=m_previousRegressionSnapshot.leaves||m_tileDraws.size()!=m_previousRegressionSnapshot.draws.size()||m_tileDraws.size()!=m_previousRegressionSnapshot.textureLayers.size())m_snapshotChanged=true;
             else for(size_t i=0;i<m_tileDraws.size();++i){const auto& a=m_tileDraws[i];const auto& b=m_previousRegressionSnapshot.draws[i];
-                if(a.id!=b.id||a.source!=b.source||a.grid!=b.grid||!std::equal(std::begin(a.uv),std::end(a.uv),b.uv.begin())){m_snapshotChanged=true;break;}
+                if(a.id!=b.id||a.source!=b.source||a.grid!=b.grid||a.layers!=m_previousRegressionSnapshot.textureLayers[i]||!std::equal(std::begin(a.uv),std::end(a.uv),b.uv.begin())){m_snapshotChanged=true;break;}
             }
         }
         return;
