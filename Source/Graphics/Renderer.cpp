@@ -38,12 +38,14 @@ bool Renderer::Initialize(HWND hwnd,UINT w,UINT h,const std::wstring& root){m_hw
  std::filesystem::path surfaceRoot;
  if(!OrbitX::Core::LoadBodySurfacePath(m_root,textureRoot,"Moon",surfaceRoot,textureError)){SetError(textureError);return false;}
  m_surfaceRoot=surfaceRoot.wstring();
- try {m_planet.Scan(surfaceRoot);}
+ int maximumLevel=11;
+ if(!Core::LoadMaxQuadtreeLevel(std::filesystem::path(m_root)/L"Config"/L"OrbitX.cfg",maximumLevel,textureError)){SetError(textureError);return false;}
+ try {m_planet.Scan(surfaceRoot,maximumLevel);}
  catch(const std::exception& e){SetError(std::string("Cannot index DDS folder: ")+e.what());return false;}
  for(int column=0;column<2;column++)if(!m_planet.files.contains({4,0,column})) {
    SetError("Missing level 04 DDS root in "+surfaceRoot.string()+"; expected 04/000000/000000.dds and 000001.dds. JPG fallback is disabled.");return false;
  }
- std::ofstream(std::filesystem::path(m_root)/L"Logs"/L"OrbitX.log",std::ios::app)<<"DDS surface root "<<surfaceRoot.string()<<", indexed "<<m_planet.files.size()<<", rejected "<<m_planet.rejectedFiles<<"\n";
+ std::ofstream(std::filesystem::path(m_root)/L"Logs"/L"OrbitX.log",std::ios::app)<<"DDS surface root "<<surfaceRoot.string()<<", indexed "<<m_planet.files.size()<<", max quadtree level "<<m_planet.MaxLevel()<<", rejected "<<m_planet.rejectedFiles<<"\n";
 #if defined(_DEBUG)
  ComPtr<ID3D12Debug> dbg; if(SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer();
 #endif

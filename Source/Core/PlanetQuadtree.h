@@ -26,7 +26,9 @@ inline TileBounds Bounds(TileId id) {
 }
 // Orbiter's internal level zero is directory 04: one latitude band, two longitude bands.
 class PlanetQuadtree {
+    int maxLevel=19; // Set at startup by Scan; immutable until the next scan.
 public:
+    int MaxLevel() const { return maxLevel; }
     std::map<TileId,std::filesystem::path> files;
     std::set<TileId> nodes;
     std::vector<TileId> leaves, requests;
@@ -39,10 +41,21 @@ public:
     bool CanEvict(TileId id,bool ready,uint64_t lastDrawFence,uint64_t completed,bool pinned) const {
         return id.level!=4 && ready && lastDrawFence<=completed && !pinned && !dependencies.contains(id);
     }
-    void Scan(const std::filesystem::path& root) {
-        files.clear();nodes.clear();rejectedFiles=0;
+    void Scan(const std::filesystem::path& root,int maximum=19) {
+        if(maximum<4 || maximum>19)throw std::invalid_argument("Maximum quadtree level must be from 4 to 19");
+        maxLevel=maximum;
+        files.clear();nodes.clear();leaves.clear();requests.clear();dependencies.clear();traceBranches.Clear();rejectedFiles=0;
         if(!std::filesystem::is_directory(root)) return;
-        for(const auto& entry:std::filesystem::recursive_directory_iterator(root)) {
+        for(auto it=std::filesystem::recursive_directory_iterator(root);it!=std::filesystem::recursive_directory_iterator();++it) {
+            const auto& entry=*it;
+            // Skip entire higher-resolution directories, including their DDS files.
+            if(it.depth()==0 && entry.is_directory()) {
+                try {
+                    const auto name=entry.path().filename().string();size_t end=0;
+                    const int level=std::stoi(name,&end);
+                    if(end==name.size() && level>maxLevel && level<=19){it.disable_recursion_pending();continue;}
+                } catch(const std::exception&) {}
+            }
             if(!entry.is_regular_file() || entry.path().extension()!=L".dds") continue;
             try {
                 auto relative=entry.path().lexically_relative(root);
@@ -52,6 +65,7 @@ public:
                 TileId id{number(parts[0]),number(parts[1]),number(entry.path().stem().string())};
                 if(id.level<4) continue; // Older global directories 01..03 are superseded by the DDS roots.
                 if(id.level>19 || id.row<0 || id.row>=(1<<(id.level-4)) || id.column<0 || id.column>=(2<<(id.level-4))) {++rejectedFiles;continue;}
+                if(id.level>maxLevel)continue;
                 files[id]=entry.path();nodes.insert(id);
                 while(id.level>4) {id=id.Parent();nodes.insert(id);}
             } catch(const std::exception&) {++rejectedFiles;}
@@ -86,7 +100,7 @@ public:
             double nearDistance=std::max(distance-radius,std::sqrt(Dot(delta,delta))-radius*extent);
             double footprint=radius*(b.north-b.south)*rad*pixelsPerRadian/nearDistance;
             bool children=false;for(int r=0;r<2;r++)for(int c=0;c<2;c++)children|=nodes.contains({id.level+1,id.row*2+r,id.column*2+c});
-            if(id.level<19 && footprint>384 && children && leaves.size()<4096) {
+            if(id.level<maxLevel && footprint>384 && children && leaves.size()<4096) {
                 bool ready=true;TileId missing{};
                 for(int r=0;r<2;r++)for(int c=0;c<2;c++) {
                     TileId child{id.level+1,id.row*2+r,id.column*2+c};

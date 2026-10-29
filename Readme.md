@@ -448,3 +448,16 @@ The cap targets an average rate; individual intervals may be shorter while
 recovering small wake-up delays. OS scheduling can still make very high caps
 undershoot, particularly at sub-millisecond intervals. Hardware measurements,
 rather than the arithmetic model, establish attainable accuracy and waiting CPU.
+
+
+Quadtree resolution limit
+-------------------------
+`Runtime/Config/OrbitX.cfg` contains `MaxQuadtreeLevel=11`. This is the maximum
+DDS directory level used for planetary surfaces, independent of which higher
+levels exist on disk. Higher-level directories are skipped when indexing, and
+selection cannot refine or request tiles above the cap. For example, level 15
+DDS files may remain installed while the renderer uses levels 4 through 11.
+Change the value to 15 to enable those textures, then restart OrbitX. The valid
+range is 4 through 19; an omitted setting defaults to 11, and an invalid setting
+fails startup with an error. Existing view-dependent LOD selection still decides
+which levels below the cap are needed.

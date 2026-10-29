@@ -1,4 +1,5 @@
 #include "../Core/PlanetQuadtree.h"
+#include "../Core/EngineConfig.h"
 #include "../Graphics/DdsSurface.h"
 #include "../Core/TexturePaths.h"
 #include "../Core/DisplayPreferences.h"
@@ -96,6 +97,62 @@ int main() {
     assert(!Core::LoadBodySurfacePath(runtime,textureRoot,"Moon",resolved,error));
     std::ofstream(cfg)<<"SurfaceTiles =   \n";
     assert(!Core::LoadBodySurfacePath(runtime,textureRoot,"Moon",resolved,error));
+    // Startup configuration and disk indexing share the same directory-level cap.
+    {
+        const auto testRoot=folder/"resolution-limit";
+        std::filesystem::create_directories(testRoot);
+        const auto config=testRoot/"OrbitX.cfg";
+        int maximum=0;std::string configError;
+        assert(!Core::LoadMaxQuadtreeLevel(config,maximum,configError));
+        std::ofstream(config)<<"TextureRoot=unused\n# MaxQuadtreeLevel=15\n";
+        assert(Core::LoadMaxQuadtreeLevel(config,maximum,configError)&&maximum==11);
+        for(int cap:{4,11,15,19}) {
+            std::ofstream(config)<<" ; ignored\r\n MaxQuadtreeLevel = "<<cap<<" ; directory level\r\n";
+            assert(Core::LoadMaxQuadtreeLevel(config,maximum,configError)&&maximum==cap);
+        }
+        for(auto value:{"", "3", "20", "11.5", "11junk", "banana", "999999999999999999999"}) {
+            std::ofstream(config)<<"MaxQuadtreeLevel="<<value<<"\n";
+            assert(!Core::LoadMaxQuadtreeLevel(config,maximum,configError));
+            assert(configError.find("MaxQuadtreeLevel")!=std::string::npos);
+        }
+        const auto tiles=testRoot/"tiles";
+        // A nested coverage chain reaches L15, but must never enter the loader
+        // index or any requests/dependencies above the configured maximum.
+        for(int level=4;level<=15;++level) {
+            const int rows=1<<(level-4);
+            Core::TileId id{level,int((90-.1)/180*rows),int((180+.1)/180*rows)};
+            const auto path=tiles/std::to_string(level)/std::to_string(id.row)/(std::to_string(id.column)+".dds");
+            std::filesystem::create_directories(path.parent_path());std::ofstream(path).put('x');
+        }
+        Core::PlanetQuadtree limited;
+        const auto camera=Core::SurfaceDirection(.1*Core::PlanetPi/180,.1*Core::PlanetPi/180)*1740;
+        for(int cap:{4,11,15,19}) {
+            std::ofstream(config)<<"MaxQuadtreeLevel="<<cap<<"\n";
+            assert(Core::LoadMaxQuadtreeLevel(config,maximum,configError));
+            limited.Scan(tiles,maximum);
+            assert(limited.MaxLevel()==cap && limited.rejectedFiles==0);
+            assert(limited.files.size()==size_t(std::min(cap,15)-3));
+            for(const auto& [id,path]:limited.files)assert(id.level<=cap);
+            for(auto id:limited.nodes)assert(id.level<=cap);
+            limited.Select(camera.x,camera.y,camera.z,1737.4,1e8,[](auto){return true;});
+            int deepest=4;for(auto id:limited.leaves){assert(id.level<=cap);deepest=std::max(deepest,id.level);}
+            assert(deepest==std::min(cap,15));
+            for(auto id:limited.dependencies)assert(id.level<=cap);
+            // Force load requests, rather than only exercising resident tiles.
+            limited.Select(camera.x,camera.y,camera.z,1737.4,1e8,[&](auto id){return id.level<cap;});
+            for(auto id:limited.requests){assert(id.level<=cap);assert(limited.files.contains(id));}
+            if(cap<=15)assert(!limited.requests.empty());
+            limited.frozen=true;
+            limited.Scan(tiles,4); // Reindex clears previously frozen high-level selections.
+            assert(limited.leaves.empty()&&limited.requests.empty()&&limited.dependencies.empty());
+            limited.Select(camera.x,camera.y,camera.z,1737.4,1e8,[](auto){return true;});
+            for(auto id:limited.leaves)assert(id.level==4);
+            limited.frozen=false;
+        }
+        bool invalid=false;try{limited.Scan(tiles,3);}catch(const std::invalid_argument&){invalid=true;}
+        assert(invalid);
+        std::filesystem::remove_all(testRoot);
+    }
     // No Moon.jpg is created or required by any surface configuration test.
     Core::PlanetQuadtree tree;tree.Scan(folder);
     assert(tree.files.size()==1 && tree.rejectedFiles==1);
